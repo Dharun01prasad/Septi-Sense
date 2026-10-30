@@ -1,0 +1,8 @@
+You are taking over the SeptiSense hackathon project in this folder. The live evaluation is tomorrow.
+Read CLAUDE.md completely first, then work through section 5 "Remaining tasks" in order, verifying each step
+with its check before moving on. Keep the existing design and the code that is already tested; fix it where
+it breaks on Windows rather than rewriting it. The main things to build are the dashboard (task 5) and the docs
+(task 7). Never invent numbers: every metric must come from results/metrics.json produced by actually running
+train.py. Start now with tasks 1-3 (install, download the dataset, train). While the download runs, start the
+backend smoke test and the dashboard. Only stop to ask me when you truly need me (hardware steps, decisions).
+Give me a short status update after each task.

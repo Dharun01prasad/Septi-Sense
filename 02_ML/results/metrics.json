@@ -1,0 +1,551 @@
+{
+ "dataset": "PhysioNet/CinC Challenge 2019 (training_setA = hospital A, training_setB = hospital B)",
+ "target": "SepsisLabel(t): Sepsis-3 onset within the next 6 h or already septic",
+ "horizon_targets": {
+  "6": "Sepsis-3 onset within the next 6 h or already septic (onset = first SepsisLabel hour + 6)",
+  "12": "Sepsis-3 onset within the next 12 h or already septic (onset = first SepsisLabel hour + 6)",
+  "24": "Sepsis-3 onset within the next 24 h or already septic (onset = first SepsisLabel hour + 6)"
+ },
+ "alerting_definition": "alarm = risk >= threshold for 2 consecutive hours; warned in time = an alarm hour within the horizon window before onset; chance = same rule on alarm sequences of random non-septic patients",
+ "split": {
+  "train_patients": 16269,
+  "val_patients": 4067,
+  "test_patients": 20000,
+  "test_hour_prevalence": 0.014147074455869133,
+  "test_patient_prevalence": 0.0571
+ },
+ "models": {
+  "wearable": {
+   "horizon_h": 6,
+   "n_features": 37,
+   "n_models": 5,
+   "test_hour_prevalence": 0.014147074455869133,
+   "auroc": 0.6849703643980487,
+   "auroc_ci95": [
+    0.6720077603436468,
+    0.6977504105269885
+   ],
+   "auprc": 0.04252773464928823,
+   "auprc_ci95": [
+    0.03785421594556656,
+    0.04868004633900165
+   ],
+   "brier_calibrated": 0.013834732178318602,
+   "brier_prevalence_only": 0.013946934740209228,
+   "threshold_calibrated": 0.037186867901042475,
+   "threshold_rule": "90 % hour-level specificity on hospital-A validation",
+   "sensitivity": 0.3232838589981447,
+   "specificity": 0.8956157691206912,
+   "ppv": 0.04255189255189255,
+   "npv": 0.9892735573706615,
+   "accuracy": 0.8875189469747177,
+   "balanced_accuracy": 0.609449814059418,
+   "alarms": {
+    "horizon_h": 6,
+    "septic_patients": 919,
+    "septic_on_arrival": 223,
+    "detected_in_window": 390,
+    "detection_rate": 0.4243743199129489,
+    "chance_detection_rate": 0.18554965572541715,
+    "any_alarm_before_onset_rate": 0.6463547334058759,
+    "lead_time_median_h": 6.0,
+    "lead_time_iqr_h": [
+     3.25,
+     6.0
+    ],
+    "false_alarms_per_patient_day": 0.3532882489212424
+   },
+   "calibration_bins": [
+    [
+     0.019541071643291004,
+     0.013576499775660483,
+     757780
+    ],
+    [
+     0.11878213290497096,
+     0.10195290063182079,
+     3482
+    ],
+    [
+     0.21253401835758545,
+     0.1869031377899045,
+     733
+    ]
+   ],
+   "operating_curve": [
+    [
+     0.0257201646090535,
+     0.7149075081610446,
+     0.8818729852033478,
+     6.0,
+     0.4721436343852013
+    ],
+    [
+     0.02662855423499323,
+     0.6779107725788901,
+     0.8069236295783306,
+     6.0,
+     0.42774755168661593
+    ],
+    [
+     0.031412501326541435,
+     0.5321001088139282,
+     0.5206025780758449,
+     6.0,
+     0.2677366702937976
+    ],
+    [
+     0.037186867901042475,
+     0.4243743199129489,
+     0.3532882489212424,
+     6.0,
+     0.1896082698585419
+    ],
+    [
+     0.042578710644677664,
+     0.35038084874863984,
+     0.24761967838122292,
+     6.0,
+     0.13324265505984764
+    ],
+    [
+     0.054271356783919596,
+     0.22306855277475518,
+     0.11890305795559421,
+     4.0,
+     0.06643090315560392
+    ],
+    [
+     0.06274900398406374,
+     0.19912948857453755,
+     0.10259319356877628,
+     4.0,
+     0.05816104461371056
+    ],
+    [
+     0.08602771362586605,
+     0.1044613710554951,
+     0.048031168427281584,
+     4.0,
+     0.027856365614798696
+    ]
+   ],
+   "top_features": [
+    [
+     "Age",
+     98545.39974822997
+    ],
+    [
+     "Temp",
+     90160.99714660645
+    ],
+    [
+     "Resp_mean6",
+     81201.27623062134
+    ],
+    [
+     "Temp_max6",
+     66773.98509597778
+    ],
+    [
+     "Resp_min6",
+     53193.02375869751
+    ],
+    [
+     "Temp_dev_base",
+     42606.69307403565
+    ],
+    [
+     "HR_max6",
+     41365.36254043579
+    ],
+    [
+     "Temp_min6",
+     31822.939866638182
+    ],
+    [
+     "HR_dev_base",
+     31393.145938110352
+    ],
+    [
+     "HR_min6",
+     30136.82714920044
+    ],
+    [
+     "Resp_std6",
+     29327.823693847655
+    ],
+    [
+     "Resp_max6",
+     28434.353485107422
+    ],
+    [
+     "O2Sat_min6",
+     26389.925561523436
+    ],
+    [
+     "sirs_partial",
+     25977.307221984862
+    ],
+    [
+     "O2Sat_mean6",
+     24731.21247406006
+    ]
+   ]
+  },
+  "wearable_bp": {
+   "horizon_h": 6,
+   "n_features": 64,
+   "n_models": 1,
+   "test_hour_prevalence": 0.014147074455869133,
+   "auroc": 0.6619853278628635,
+   "auroc_ci95": [
+    0.6493041965075216,
+    0.6733912854786631
+   ],
+   "auprc": 0.03609077550706053,
+   "auprc_ci95": [
+    0.03263468911140495,
+    0.04086488969912622
+   ],
+   "brier_calibrated": 0.013940005411118986,
+   "brier_prevalence_only": 0.013946934740209228,
+   "threshold_calibrated": 0.046446446446446445,
+   "threshold_rule": "90 % hour-level specificity on hospital-A validation",
+   "sensitivity": 0.2679035250463822,
+   "specificity": 0.9078479529828345,
+   "ppv": 0.04004770224921652,
+   "npv": 0.9885603459147302,
+   "accuracy": 0.898794611513199,
+   "balanced_accuracy": 0.5878757390146083,
+   "alarms": {
+    "horizon_h": 6,
+    "septic_patients": 919,
+    "septic_on_arrival": 223,
+    "detected_in_window": 342,
+    "detection_rate": 0.3721436343852013,
+    "chance_detection_rate": 0.1766109762209052,
+    "any_alarm_before_onset_rate": 0.6332970620239391,
+    "lead_time_median_h": 5.0,
+    "lead_time_iqr_h": [
+     3.0,
+     6.0
+    ],
+    "false_alarms_per_patient_day": 0.3794807853729542
+   }
+  },
+  "full_icu": {
+   "horizon_h": 6,
+   "n_features": 140,
+   "n_models": 1,
+   "test_hour_prevalence": 0.014147074455869133,
+   "auroc": 0.7718666337527639,
+   "auroc_ci95": [
+    0.7590189298390522,
+    0.7836548757428006
+   ],
+   "auprc": 0.05415787707373299,
+   "auprc_ci95": [
+    0.049227709272727155,
+    0.05980972717538332
+   ],
+   "brier_calibrated": 0.014214152092638087,
+   "brier_prevalence_only": 0.013946934740209228,
+   "threshold_calibrated": 0.04777365491651205,
+   "threshold_rule": "90 % hour-level specificity on hospital-A validation",
+   "sensitivity": 0.3010204081632653,
+   "specificity": 0.9475529641979993,
+   "ppv": 0.07609511302879655,
+   "npv": 0.9895252804263843,
+   "accuracy": 0.9384064199896325,
+   "balanced_accuracy": 0.6242866861806323,
+   "alarms": {
+    "horizon_h": 6,
+    "septic_patients": 919,
+    "septic_on_arrival": 223,
+    "detected_in_window": 363,
+    "detection_rate": 0.39499455930359084,
+    "chance_detection_rate": 0.2756874908696447,
+    "any_alarm_before_onset_rate": 0.5070729053318824,
+    "lead_time_median_h": 6.0,
+    "lead_time_iqr_h": [
+     4.0,
+     6.0
+    ],
+    "false_alarms_per_patient_day": 0.11067901616732584
+   }
+  }
+ },
+ "horizons": {
+  "6": {
+   "horizon_h": 6,
+   "n_features": 37,
+   "n_models": 5,
+   "test_hour_prevalence": 0.014147074455869133,
+   "auroc": 0.6849703643980487,
+   "auroc_ci95": [
+    0.6720077603436468,
+    0.6977504105269885
+   ],
+   "auprc": 0.04252773464928823,
+   "auprc_ci95": [
+    0.03785421594556656,
+    0.04868004633900165
+   ],
+   "brier_calibrated": 0.013834732178318602,
+   "brier_prevalence_only": 0.013946934740209228,
+   "threshold_calibrated": 0.037186867901042475,
+   "threshold_rule": "90 % hour-level specificity on hospital-A validation",
+   "sensitivity": 0.3232838589981447,
+   "specificity": 0.8956157691206912,
+   "ppv": 0.04255189255189255,
+   "npv": 0.9892735573706615,
+   "accuracy": 0.8875189469747177,
+   "balanced_accuracy": 0.609449814059418,
+   "alarms": {
+    "horizon_h": 6,
+    "septic_patients": 919,
+    "septic_on_arrival": 223,
+    "detected_in_window": 390,
+    "detection_rate": 0.4243743199129489,
+    "chance_detection_rate": 0.18554965572541715,
+    "any_alarm_before_onset_rate": 0.6463547334058759,
+    "lead_time_median_h": 6.0,
+    "lead_time_iqr_h": [
+     3.25,
+     6.0
+    ],
+    "false_alarms_per_patient_day": 0.3532882489212424
+   },
+   "calibration_bins": [
+    [
+     0.019541071643291004,
+     0.013576499775660483,
+     757780
+    ],
+    [
+     0.11878213290497096,
+     0.10195290063182079,
+     3482
+    ],
+    [
+     0.21253401835758545,
+     0.1869031377899045,
+     733
+    ]
+   ],
+   "operating_curve": [
+    [
+     0.0257201646090535,
+     0.7149075081610446,
+     0.8818729852033478,
+     6.0,
+     0.4721436343852013
+    ],
+    [
+     0.02662855423499323,
+     0.6779107725788901,
+     0.8069236295783306,
+     6.0,
+     0.42774755168661593
+    ],
+    [
+     0.031412501326541435,
+     0.5321001088139282,
+     0.5206025780758449,
+     6.0,
+     0.2677366702937976
+    ],
+    [
+     0.037186867901042475,
+     0.4243743199129489,
+     0.3532882489212424,
+     6.0,
+     0.1896082698585419
+    ],
+    [
+     0.042578710644677664,
+     0.35038084874863984,
+     0.24761967838122292,
+     6.0,
+     0.13324265505984764
+    ],
+    [
+     0.054271356783919596,
+     0.22306855277475518,
+     0.11890305795559421,
+     4.0,
+     0.06643090315560392
+    ],
+    [
+     0.06274900398406374,
+     0.19912948857453755,
+     0.10259319356877628,
+     4.0,
+     0.05816104461371056
+    ],
+    [
+     0.08602771362586605,
+     0.1044613710554951,
+     0.048031168427281584,
+     4.0,
+     0.027856365614798696
+    ]
+   ],
+   "top_features": [
+    [
+     "Age",
+     98545.39974822997
+    ],
+    [
+     "Temp",
+     90160.99714660645
+    ],
+    [
+     "Resp_mean6",
+     81201.27623062134
+    ],
+    [
+     "Temp_max6",
+     66773.98509597778
+    ],
+    [
+     "Resp_min6",
+     53193.02375869751
+    ],
+    [
+     "Temp_dev_base",
+     42606.69307403565
+    ],
+    [
+     "HR_max6",
+     41365.36254043579
+    ],
+    [
+     "Temp_min6",
+     31822.939866638182
+    ],
+    [
+     "HR_dev_base",
+     31393.145938110352
+    ],
+    [
+     "HR_min6",
+     30136.82714920044
+    ],
+    [
+     "Resp_std6",
+     29327.823693847655
+    ],
+    [
+     "Resp_max6",
+     28434.353485107422
+    ],
+    [
+     "O2Sat_min6",
+     26389.925561523436
+    ],
+    [
+     "sirs_partial",
+     25977.307221984862
+    ],
+    [
+     "O2Sat_mean6",
+     24731.21247406006
+    ]
+   ]
+  },
+  "12": {
+   "horizon_h": 12,
+   "n_features": 37,
+   "n_models": 3,
+   "test_hour_prevalence": 0.020951581047119732,
+   "auroc": 0.6727990556497413,
+   "auroc_ci95": [
+    0.6589095948569308,
+    0.6875830061934054
+   ],
+   "auprc": 0.05260687365957252,
+   "auprc_ci95": [
+    0.0471406326125194,
+    0.05957851240667797
+   ],
+   "brier_calibrated": 0.02038284056092063,
+   "brier_prevalence_only": 0.020512612298745705,
+   "threshold_calibrated": 0.06407423773751655,
+   "threshold_rule": "90 % hour-level specificity on hospital-A validation",
+   "sensitivity": 0.25537112433448167,
+   "specificity": 0.9221733710440599,
+   "ppv": 0.06561202484791914,
+   "npv": 0.9830136727931563,
+   "accuracy": 0.9082028097297227,
+   "balanced_accuracy": 0.5887722476892708,
+   "alarms": {
+    "horizon_h": 12,
+    "septic_patients": 919,
+    "septic_on_arrival": 223,
+    "detected_in_window": 387,
+    "detection_rate": 0.4211099020674646,
+    "chance_detection_rate": 0.20832276015646856,
+    "any_alarm_before_onset_rate": 0.5843307943416758,
+    "lead_time_median_h": 9.0,
+    "lead_time_iqr_h": [
+     4.0,
+     12.0
+    ],
+    "false_alarms_per_patient_day": 0.27740591376562346
+   }
+  },
+  "24": {
+   "horizon_h": 24,
+   "n_features": 37,
+   "n_models": 3,
+   "test_hour_prevalence": 0.03246215526348598,
+   "auroc": 0.6634047459069077,
+   "auroc_ci95": [
+    0.6500683507976919,
+    0.6786738914718405
+   ],
+   "auprc": 0.07281307654130056,
+   "auprc_ci95": [
+    0.06626427841928921,
+    0.08142357613044558
+   ],
+   "brier_calibrated": 0.03127810931774003,
+   "brier_prevalence_only": 0.03140836373913531,
+   "threshold_calibrated": 0.09774339136041264,
+   "threshold_rule": "90 % hour-level specificity on hospital-A validation",
+   "sensitivity": 0.22853331177231564,
+   "specificity": 0.9258944278740578,
+   "ppv": 0.09376658704883227,
+   "npv": 0.9728048886501061,
+   "accuracy": 0.9032565830484452,
+   "balanced_accuracy": 0.5772138698231868,
+   "alarms": {
+    "horizon_h": 24,
+    "septic_patients": 919,
+    "septic_on_arrival": 223,
+    "detected_in_window": 422,
+    "detection_rate": 0.4591947769314472,
+    "chance_detection_rate": 0.27276299829961437,
+    "any_alarm_before_onset_rate": 0.558215451577802,
+    "lead_time_median_h": 16.0,
+    "lead_time_iqr_h": [
+     7.0,
+     22.75
+    ],
+    "false_alarms_per_patient_day": 0.25929919991246114
+   }
+  }
+ },
+ "baselines": {
+  "news2_partial": {
+   "auroc": 0.6333056191085469,
+   "auprc": 0.025146036429475153
+  },
+  "news2_bp": {
+   "auroc": 0.6434164843429835,
+   "auprc": 0.027117145052099105
+  }
+ }
+}

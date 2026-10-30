@@ -1,0 +1,42 @@
+# SeptiSense - what is NOT saved in git.
+# Saved on purpose: all code, the trained models (02_ML/models), the evaluation (02_ML/results),
+# the replay/sample patients (02_ML/replay), firmware, dashboard, docs.
+
+# ---- dataset: 322 MB, re-download with  python 02_ML/download_data.py
+02_ML/data/
+*.part
+
+# ---- runtime database: patient accounts, phone numbers, readings, SMS-gateway password
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ---- Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# ---- Arduino / build output
+build/
+*.elf
+*.bin
+*.map
+
+# ---- editors, OS, local tools
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+.claude/settings.local.json
+
+# ---- logs
+*.log

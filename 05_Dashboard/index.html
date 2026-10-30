@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SeptiSense</title>
+<!--
+  SeptiSense dashboard - single file, vanilla JS, no external dependencies (works with no internet).
+  Served by the backend at http://localhost:8000.  Data: WebSocket /ws (live) + REST /api/v1.
+  Patient view first (plain language); a "Technical details" switch shows waveforms, signal quality,
+  device statistics, model output and evaluation. Every number comes from the backend; model metrics come from
+  02_ML/results/metrics.json (train.py).  Educational research prototype - NOT a medical device.
+-->
+<style>
+:root {
+  --bg: #f3f6f8; --card: #ffffff; --ink: #13212c; --muted: #5b6b78; --faint: #8a98a4; --line: #e2e8ee; --grid: #edf1f4;
+  --brand: #0d7a84; --brand-ink: #ffffff; --brand-soft: #e3f3f4;
+  --good: #19804a; --good-bg: #e6f5ec; --attn: #a35f00; --attn-bg: #fff3dc; --urgent: #c0261f; --urgent-bg: #fde9e7;
+  --unknown: #66737f; --unknown-bg: #eef1f4;
+  --ecg: #15a34a; --hr2: #6fcf97; --spo2: #0891b2; --resp: #c08a00; --temp: #e2570b; --temp2: #f4a46f; --hrv: #7c5cd6; --risk: #13212c;
+  --shadow: 0 1px 2px rgba(16,33,44,.06), 0 4px 16px rgba(16,33,44,.06);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font: 15.5px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; min-height: 100vh; }
+h1, h2, h3 { margin: 0; line-height: 1.25; }
+h1 { font-size: 24px; } h2 { font-size: 18px; } h3 { font-size: 14px; color: var(--muted); font-weight: 600; }
+p { margin: 6px 0; }
+a { color: var(--brand); }
+button, input, select { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
+button:hover { border-color: var(--faint); }
+button.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+button.primary:hover { filter: brightness(1.08); }
+button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+button.danger { color: var(--urgent); }
+button:disabled { opacity: .55; cursor: default; }
+input, select { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 9px 11px; width: 100%; }
+input:focus, select:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+label.f { display: block; font-size: 13.5px; color: var(--muted); font-weight: 600; }
+label.f input, label.f select { margin-top: 4px; font-weight: 400; color: var(--ink); }
+.hint { font-size: 12.5px; color: var(--faint); font-weight: 400; }
+.muted { color: var(--muted); } .faint { color: var(--faint); } .small { font-size: 13px; }
+.mono { font-variant-numeric: tabular-nums; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.spread { justify-content: space-between; }
+.hidden { display: none !important; }
+svg.i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------- auth */
+#auth { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+  background: radial-gradient(1200px 500px at 20% -10%, #d5eef0, transparent), var(--bg); }
+.authcard { width: 100%; max-width: 430px; background: #fff; border-radius: 18px; box-shadow: var(--shadow); padding: 28px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 22px; letter-spacing: .01em; }
+.logo .mark { width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: #fff; display: grid; place-items: center; }
+.logo span { color: var(--brand); }
+.authcard form { display: grid; gap: 12px; margin-top: 18px; }
+.err { color: var(--urgent); font-size: 14px; min-height: 1.2em; }
+.disc { font-size: 12.5px; color: var(--attn); background: var(--attn-bg); border-radius: 10px; padding: 8px 12px; margin-top: 16px; }
+
+/* ---------- app shell */
+header { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.96); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+.bar { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; padding: 10px 20px; max-width: 1400px; margin: 0 auto; }
+nav { display: flex; gap: 2px; flex-wrap: wrap; }
+nav button { border: 0; background: transparent; color: var(--muted); padding: 8px 12px; border-radius: 9px; }
+nav button.on { background: var(--brand-soft); color: var(--brand); }
+.grow { flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 11px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.chip.sim { background: #f1e8ff; color: #6b2fb3; } .chip.demo { background: #e1f1ff; color: #0b5c9e; }
+.chip.ok { background: var(--good-bg); color: var(--good); } .chip.bad { background: var(--urgent-bg); color: var(--urgent); }
+.chip.idle { background: var(--unknown-bg); color: var(--unknown); }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
+.switch input { display: none; }
+.switch .tr { width: 38px; height: 22px; border-radius: 11px; background: #cfd8df; position: relative; transition: .2s; }
+.switch .tr::after { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: .2s; }
+.switch input:checked + .tr { background: var(--brand); }
+.switch input:checked + .tr::after { left: 19px; }
+.notice { background: var(--attn-bg); color: #6f4300; font-size: 13px; text-align: center; padding: 5px 12px; }
+#alarmBar { display: none; background: var(--urgent); color: #fff; font-weight: 700; padding: 8px 20px; text-align: center; }
+#alarmBar.on { display: block; animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { background: #8f1813; } }
+main { max-width: 1400px; margin: 0 auto; padding: 18px 20px 48px; }
+.view { display: none; } .view.on { display: block; }
+.card { background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 18px 20px; }
+.stack > * + * { margin-top: 16px; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.grid-side { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 980px) { .grid2, .grid-side { grid-template-columns: minmax(0, 1fr); } }
+body:not(.tech) .tech-only { display: none !important; }
+
+/* ---------- status hero */
+.hero { display: flex; gap: 18px; align-items: center; border-radius: 18px; padding: 22px 24px; }
+.hero .ic { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; flex: none; background: rgba(255,255,255,.7); }
+.hero .ic svg { width: 34px; height: 34px; }
+.hero h1 { font-size: 26px; }
+.hero ul { margin: 6px 0 0; padding-left: 18px; }
+.lv-normal, .lv-low { background: var(--good-bg); color: var(--good); }
+.lv-attention, .lv-raised { background: var(--attn-bg); color: var(--attn); }
+.lv-urgent, .lv-high { background: var(--urgent-bg); color: var(--urgent); }
+.lv-unknown { background: var(--unknown-bg); color: var(--unknown); }
+.hero p, .hero li { color: var(--ink); }
+
+/* ---------- vital cards */
+.vitals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1100px) { .vitals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .vitals { grid-template-columns: minmax(0, 1fr); } }
+.vcard { background: #fff; border-radius: 16px; box-shadow: var(--shadow); padding: 16px 18px; border-top: 4px solid var(--c); min-width: 0; }
+.vcard .top { display: flex; align-items: center; gap: 8px; color: var(--c); font-weight: 700; }
+.vcard .val { font-size: 42px; font-weight: 700; line-height: 1.1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.vcard .val small { font-size: 15px; color: var(--muted); font-weight: 600; margin-left: 4px; }
+.vcard .st { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 12.5px; font-weight: 700; margin-top: 4px; }
+.vcard p { font-size: 13.5px; color: var(--muted); margin: 8px 0 0; }
+.vcard .tech-only { font-size: 12.5px; color: var(--faint); margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 6px; }
+
+/* ---------- outlook */
+.outlook { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+@media (max-width: 800px) { .outlook { grid-template-columns: minmax(0, 1fr); } }
+.otile { border-radius: 14px; padding: 14px 16px; border: 1px solid var(--line); background: #fff; }
+.otile .oh { font-size: 13px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.otile .olv { font-size: 24px; font-weight: 800; margin-top: 2px; }
+.otile.lv-low .olv { color: var(--good); } .otile.lv-raised .olv { color: var(--attn); } .otile.lv-high .olv { color: var(--urgent); }
+.otile.lv-low, .otile.lv-raised, .otile.lv-high { background: #fff; }
+.otile p { color: var(--muted); font-size: 13.5px; }
+.meter { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px; }
+.meter i { height: 8px; border-radius: 4px; background: var(--grid); }
+.meter i.g { background: var(--good); } .meter i.a { background: #e6a23c; } .meter i.u { background: var(--urgent); }
+.meterlab { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 11px; color: var(--faint); margin-top: 2px; }
+.meterlab span:nth-child(2) { text-align: center; } .meterlab span:nth-child(3) { text-align: right; }
+.otile .tech-only { font-size: 12.5px; color: var(--faint); border-top: 1px dashed var(--line); padding-top: 6px; margin-top: 8px; }
+
+/* ---------- heat strip (risk level per hour) */
+.strips { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 6px 10px; align-items: center; margin-top: 10px; }
+.strip { display: grid; gap: 1px; height: 26px; border-radius: 6px; overflow: hidden; background: var(--grid); }
+.strip i { display: block; }
+.strip i.low { background: #7fcf9f; } .strip i.raised { background: #f1c060; } .strip i.high { background: #e2554b; } .strip i.none { background: var(--grid); }
+.strip.marks { height: 18px; background: transparent; overflow: visible; }
+.strip.marks i { position: relative; } .strip.marks i.m::after { content: attr(data-m); position: absolute; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 700; color: var(--urgent); white-space: nowrap; top: 0; }
+.strip.marks i.ls::after { color: var(--attn); }
+.axis { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--faint); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.legend b { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
+
+/* ---------- tech panels */
+.wave { position: relative; border-radius: 10px; overflow: hidden; }
+.wave canvas { display: block; width: 100%; background-color: #04120a;
+  background-image: linear-gradient(#0c2a19 1px, transparent 1px), linear-gradient(90deg, #0c2a19 1px, transparent 1px); background-size: 20px 20px; }
+.wave.ppg canvas { background-color: #031115; background-image: linear-gradient(#0a2830 1px, transparent 1px), linear-gradient(90deg, #0a2830 1px, transparent 1px); }
+.wave .lbl { position: absolute; left: 10px; top: 6px; font-size: 12.5px; font-weight: 700; pointer-events: none; }
+.wave .flag { position: absolute; right: 10px; top: 6px; font-weight: 700; font-size: 13px; padding: 1px 8px; border-radius: 5px; display: none; background: #3a2205; color: #f5a524; border: 1px solid #f5a524; }
+.wave .flag.on { display: block; }
+#ecgCanvas { height: 150px; } #ppgCanvas { height: 90px; }
+.qual { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 18px; }
+@media (max-width: 700px) { .qual { grid-template-columns: minmax(0, 1fr); } }
+.qbar { font-size: 13px; }
+.qbar .t { display: flex; justify-content: space-between; }
+.qbar .track { height: 7px; background: var(--grid); border-radius: 4px; overflow: hidden; margin-top: 3px; }
+.qbar .fill { height: 100%; width: 0; border-radius: 4px; transition: width .3s; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; margin: 8px 0 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.trends { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 800px) { .trends { grid-template-columns: minmax(0, 1fr); } }
+.reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.reasons ul { list-style: none; margin: 4px 0 0; padding: 0; font-size: 13.5px; }
+.reasons li { margin: 4px 0; }
+.rbar { height: 4px; border-radius: 2px; margin-top: 2px; }
+.up .rbar { background: #e07a5f; } .down .rbar { background: #5fa8e0; }
+
+/* ---------- charts */
+.chart { position: relative; }
+.chart canvas { display: block; width: 100%; }
+.chart .lg { display: flex; gap: 14px; font-size: 12.5px; color: var(--muted); min-height: 18px; flex-wrap: wrap; }
+.chart .lg i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.tip { position: absolute; pointer-events: none; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 6px 9px; font-size: 12.5px; white-space: nowrap; display: none; z-index: 5; }
+.tip i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+
+/* ---------- lists & tables */
+.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tbl th, .tbl td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+.tbl td.num, .tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl tr.me td { font-weight: 700; }
+.scroll { max-height: 320px; overflow: auto; }
+.item { display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fff; margin-top: 8px; font-weight: 400; }
+.item.on { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); }
+.item b { display: block; }
+.dots { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.dots i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dots i.low { background: var(--good); } .dots i.raised { background: #e6a23c; } .dots i.high { background: var(--urgent); }
+.alert { display: flex; gap: 12px; align-items: center; border-radius: 12px; padding: 10px 14px; margin-top: 8px; border: 1px solid var(--line); border-left: 5px solid #e6a23c; }
+.alert.alarm { border-left-color: var(--urgent); background: var(--urgent-bg); }
+.alert .msg { flex: 1; min-width: 0; } .alert .msg small { display: block; color: var(--muted); }
+.sev { font-weight: 800; font-size: 12px; letter-spacing: .05em; }
+.sev.alarm { color: var(--urgent); } .sev.warn { color: var(--attn); }
+.form { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 16px; }
+.chk { display: flex; gap: 8px; align-items: center; font-size: 14px; } .chk input { width: auto; }
+.status { font-size: 13.5px; }
+.prose { max-width: 860px; } .prose h2 { margin-top: 18px; } .prose li { margin: 4px 0; }
+.evalimg { width: 100%; border-radius: 10px; border: 1px solid var(--line); margin-top: 10px; }
+.big { font-size: 34px; font-weight: 800; line-height: 1.1; }
+.drop { border: 2px dashed var(--line); border-radius: 14px; padding: 22px; text-align: center; background: #fafcfd; }
+.drop.over { border-color: var(--brand); background: var(--brand-soft); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 2.7l5.7 5.6a8 8 0 1 1-11.3 0z"/></symbol>
+  <symbol id="i-temp" viewBox="0 0 24 24"><path d="M14 14.8V4a2 2 0 0 0-4 0v10.8a4 4 0 1 0 4 0z"/></symbol>
+  <symbol id="i-wind" viewBox="0 0 24 24"><path d="M9.6 4.6A2 2 0 1 1 11 8H2m10.6 11.4A2 2 0 1 0 14 16H2m15.7-8.3A2.5 2.5 0 1 1 19.5 12H2"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><path d="M22 4L12 14l-3-3"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9z"/><path d="M12 8v4M12 16h.01"/></symbol>
+  <symbol id="i-wait" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+</svg>
+
+<!-- =========================================================== SIGN IN / SIGN UP -->
+<section id="auth" class="hidden">
+  <div class="authcard">
+    <div class="logo"><div class="mark"><svg class="i"><use href="#i-pulse"/></svg></div>Septi<span>Sense</span></div>
+    <p class="muted" style="margin-top:10px" id="authLead">Sign in to see your readings and history.</p>
+    <form id="loginForm">
+      <label class="f">Phone number<input name="phone" type="tel" autocomplete="tel" required></label>
+      <label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <div class="err" id="loginErr"></div>
+      <button class="primary" type="submit">Sign in</button>
+      <p class="small muted" style="text-align:center">New here? <a href="#" id="toSignup">Create an account</a></p>
+    </form>
+    <form id="signupForm" class="hidden">
+      <label class="f">Your name<input name="name" autocomplete="name" required></label>
+      <label class="f">Phone number <span class="hint">— alerts are sent here</span><input name="phone" type="tel" autocomplete="tel" required></label>
+      <div class="row" style="flex-wrap:nowrap">
+        <label class="f" style="flex:1">Age<input name="age" type="number" min="1" max="120" required></label>
+        <label class="f" style="flex:1">Sex<select name="gender"><option value="1">Male</option><option value="0">Female</option></select></label>
+      </div>
+      <label class="f">Password <span class="hint">— at least 6 characters</span><input name="password" type="password" autocomplete="new-password" minlength="6" required></label>
+      <div class="err" id="signupErr"></div>
+      <button class="primary" type="submit">Create account</button>
+      <p class="small muted" style="text-align:center">Already have an account? <a href="#" id="toLogin">Sign in</a></p>
+    </form>
+    <div class="disc">Educational research prototype — not a medical device. It cannot diagnose sepsis or any other condition.</div>
+  </div>
+</section>
+
+<!-- =========================================================== APP -->
+<div id="app" class="hidden">
+<header>
+  <div class="bar">
+    <div class="logo"><div class="mark"><svg class="i"><use href="#i-pulse"/></svg></div>Septi<span>Sense</span></div>
+    <nav id="tabs">
+      <button data-v="home" class="on">Home</button>
+      <button data-v="history">History</button>
+      <button data-v="upload">Check a recording</button>
+      <button data-v="alerts">Alerts <span id="alertBadge"></span></button>
+      <button data-v="settings">Settings</button>
+    </nav>
+    <div class="grow"></div>
+    <span class="chip idle" id="sensorChip">Sensor: not connected</span>
+    <span class="chip sim hidden" id="simChip">SIMULATED DATA</span>
+    <span class="chip demo hidden" id="demoChip">DEMO TIME</span>
+    <label class="switch" title="Show waveforms, signal quality, device and model details"><input type="checkbox" id="techToggle"><span class="tr"></span>Technical details</label>
+    <span class="small muted" id="userName"></span>
+    <button class="ghost small" id="logoutBtn">Sign out</button>
+  </div>
+  <div class="notice">Educational research prototype — not a medical device and not clinically validated. It does not diagnose. In an emergency call 112.</div>
+  <div id="alarmBar"></div>
+</header>
+
+<main>
+<!-- =========================================================== HOME -->
+<section class="view on stack" id="v-home">
+  <div class="card hidden" id="startCard">
+    <div class="row spread">
+      <div><h2>Start monitoring</h2><p class="muted" id="startText">Put the sensors on, then press Start. Your readings are saved to your account.</p></div>
+      <button class="primary" id="startBtn">Start monitoring</button>
+    </div>
+  </div>
+  <div class="row spread hidden" id="sessionBar">
+    <span class="muted" id="sessionText"></span>
+    <button class="ghost" id="stopBtn">Stop monitoring</button>
+  </div>
+
+  <div class="hero lv-unknown" id="hero">
+    <div class="ic"><svg class="i"><use href="#i-wait"/></svg></div>
+    <div><h1 id="heroHead">Loading…</h1><p id="heroText"></p><ul id="heroHints"></ul></div>
+  </div>
+
+  <div>
+    <div class="row spread" style="margin-bottom:10px"><h2>Right now</h2><span class="small faint">average of the last 30 seconds of clean signal</span></div>
+    <div class="vitals" id="vitals"></div>
+  </div>
+
+  <div class="card">
+    <div class="row spread"><h2>Outlook</h2><span class="small faint">estimated chance of developing sepsis — not a diagnosis</span></div>
+    <div class="outlook" id="outlook"></div>
+    <p class="small faint" id="outlookNote" style="margin-top:10px"></p>
+  </div>
+
+  <!-- technical -->
+  <div class="card tech-only">
+    <div class="row spread"><h2>Live signals</h2><span class="small faint" id="liveInfo"></span></div>
+    <div class="wave" style="margin-top:10px"><canvas id="ecgCanvas"></canvas><div class="lbl" style="color:#3ee07f">ECG · forearm · 250 Hz · 5 s sweep</div><div class="flag" id="ecgFlag">LEADS OFF</div></div>
+    <div class="wave ppg" style="margin-top:8px"><canvas id="ppgCanvas"></canvas><div class="lbl" style="color:#22d3ee">PPG (infrared) · 25 Hz</div><div class="flag" id="ppgFlag">NO FINGER</div></div>
+    <dl class="kv" id="liveKv" style="grid-template-columns:repeat(4, auto 1fr)"></dl>
+  </div>
+  <div class="grid2 tech-only">
+    <div class="card">
+      <div class="row spread"><h2>Model output · 6 h</h2><span class="small faint" id="riskQ"></span></div>
+      <div class="row" style="margin-top:6px;gap:18px"><div class="big" id="riskBig">--</div><div class="small muted" id="riskSub"></div></div>
+      <div class="reasons" style="margin-top:10px"><div><h3>▲ Raising risk</h3><ul class="up" id="rUp"></ul></div><div><h3>▼ Lowering risk</h3><ul class="down" id="rDown"></ul></div></div>
+      <h3 style="margin-top:12px">Risk history (per model hour)</h3><div id="liveRiskChart"></div>
+      <p class="small faint">Calibrated probability; band = ensemble spread (±1 SD); reasons = per-prediction feature contributions (tree SHAP).</p>
+    </div>
+    <div class="stack">
+      <div class="card"><h2>Signal quality</h2><p class="small faint">seconds with poor quality are left out of the model's hourly input</p><div class="qual" id="qual" style="margin-top:10px"></div></div>
+      <div class="card"><div class="row spread"><h2>Device &amp; connectivity</h2><span class="chip idle" id="devChip">no device</span></div>
+        <dl class="kv" id="devKv"></dl><h3 style="margin-top:10px">Recent outages</h3><div class="small muted" id="outages"></div></div>
+    </div>
+  </div>
+  <div class="card tech-only">
+    <div class="row spread"><h2>Trends · last 30 min</h2><span class="small faint">clean seconds only</span></div>
+    <div class="trends" style="margin-top:10px">
+      <div><h3>Heart rate (bpm)</h3><div id="trHr"></div></div><div><h3>SpO₂ (%)</h3><div id="trSpo2"></div></div>
+      <div><h3>Temperature (°C)</h3><div id="trTemp"></div></div><div><h3>Breathing rate (/min, derived)</h3><div id="trRr"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== HISTORY -->
+<section class="view" id="v-history">
+  <div class="grid-side">
+    <div class="card"><h2>Your history</h2><p class="small muted">Monitoring sessions and checked recordings, newest first.</p><div id="histList"></div></div>
+    <div class="card" id="histDetail"><p class="muted">Choose a session or recording on the left.</p></div>
+  </div>
+</section>
+
+<!-- =========================================================== UPLOAD -->
+<section class="view" id="v-upload">
+  <div class="grid-side">
+    <div class="card">
+      <h2>Check a recording</h2>
+      <p class="muted small">Upload vital signs that were recorded earlier and get the same 6 / 12 / 24 hour outlook as live monitoring.</p>
+      <div class="drop" id="drop" style="margin-top:12px">
+        <p style="margin:0"><b>Drop a CSV or .psv file here</b></p>
+        <p class="small muted">or</p>
+        <input type="file" id="upFile" accept=".csv,.psv,.txt" style="max-width:260px">
+        <p class="small muted" id="upFileName"></p>
+      </div>
+      <div class="form" style="margin-top:12px;grid-template-columns:1fr 1fr">
+        <label class="f">Age<input id="upAge" type="number" min="1" max="120"></label>
+        <label class="f">Sex<select id="upSex"><option value="1">Male</option><option value="0">Female</option></select></label>
+      </div>
+      <p class="hint">Age and sex from the file are used if it has them.</p>
+      <button class="primary" id="upBtn" style="margin-top:10px;width:100%" disabled>Analyse recording</button>
+      <p class="err" id="upErr"></p>
+      <details style="margin-top:6px"><summary class="small muted">File format</summary>
+        <p class="small muted">One row per <b>hour</b>, oldest first. Columns (any subset, header names are flexible):
+          <code>HR</code> (heart rate), <code>O2Sat</code> or <code>SpO2</code>, <code>Temp</code> (°C), <code>Resp</code> (breaths/min).
+          Optional: <code>Age</code>, <code>Gender</code> (1 = male, 0 = female), <code>SepsisLabel</code> (to compare with the recorded outcome).
+          PhysioNet 2019 <code>.psv</code> files work as they are.</p></details>
+      <h3 style="margin-top:14px">No file? Try a real recorded patient</h3>
+      <p class="small muted">Held-out patients from hospital B of the PhysioNet 2019 dataset (never used for training):</p>
+      <div id="sampleLinks" class="small"></div>
+    </div>
+    <div class="card" id="upDetail"><p class="muted">The result appears here.</p></div>
+  </div>
+</section>
+
+<!-- =========================================================== ALERTS -->
+<section class="view stack" id="v-alerts">
+  <div class="card"><div class="row spread"><h2>Active alerts</h2><span class="muted small" id="alertCount"></span></div><div id="activeAlerts"></div></div>
+  <div class="card"><h2>Alert history</h2><div class="scroll" style="max-height:520px;margin-top:8px"><table class="tbl" id="alertHist"></table></div></div>
+</section>
+
+<!-- =========================================================== SETTINGS -->
+<section class="view stack" id="v-settings">
+  <div class="grid2">
+    <div class="card">
+      <h2>Your profile</h2>
+      <div class="form" style="margin-top:12px">
+        <label class="f">Name<input id="pName"></label>
+        <label class="f">Phone number<input id="pPhone" type="tel"></label>
+        <label class="f">Age<input id="pAge" type="number" min="1" max="120"></label>
+        <label class="f">Sex<select id="pSex"><option value="1">Male</option><option value="0">Female</option></select></label>
+      </div>
+      <label class="chk" style="margin-top:12px"><input type="checkbox" id="pSms"> Text me when an alarm-level alert is raised</label>
+      <div class="row" style="margin-top:12px"><button class="primary" id="pSave">Save profile</button><span class="status" id="pStatus"></span></div>
+      <p class="small faint" style="margin-top:10px">Age and sex are model inputs. Changes apply to new predictions.</p>
+    </div>
+    <div class="card">
+      <h2>Phone alerts (SMS)</h2>
+      <p class="small muted">Alarm-level alerts are texted to the patient's phone number through an Android phone running
+        <b>SMS Gateway for Android</b> (sms-gate.app) in <i>Local Server</i> mode, on the same Wi-Fi/hotspot as this laptop. No internet needed.
+        At most one SMS per patient per interval.</p>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="sEnabled"> Phone alerts on</label>
+      <div class="form" style="margin-top:10px">
+        <label class="f">Gateway address<input id="sUrl" placeholder="http://192.168.43.1:8080"></label>
+        <label class="f">Gateway username<input id="sUser"></label>
+        <label class="f">Gateway password<input id="sPass" type="password"></label>
+        <label class="f">Country code<input id="sCc" placeholder="+91"></label>
+        <label class="f">Minimum minutes between SMS<input id="sGap" type="number" min="0"></label>
+      </div>
+      <div class="row" style="margin-top:12px"><button class="primary" id="sSave">Save</button><button id="sTest">Send test SMS to my phone</button><span class="status" id="sStatus"></span></div>
+    </div>
+  </div>
+  <div class="card tech-only">
+    <div class="row spread"><h2>Alarm thresholds &amp; limits</h2><div class="row"><button class="primary" id="cfgSave">Save</button><span class="status" id="cfgStatus"></span></div></div>
+    <div class="form" id="cfgForm" style="margin-top:12px"></div>
+  </div>
+  <div class="grid2 tech-only">
+    <div class="card">
+      <h2>Demo time compression</h2>
+      <p class="small muted">The model works on hourly data. For a live demo one "model hour" can be compressed into a few seconds; the <b>DEMO TIME</b> badge shows whenever this is not real time.</p>
+      <div class="row" style="margin-top:8px"><button data-sph="3600">Real time</button><button data-sph="60">1 h = 60 s</button><button data-sph="20">1 h = 20 s</button><span class="small muted" id="sphNow"></span></div>
+    </div>
+    <div class="card">
+      <h2>Temperature calibration</h2>
+      <p class="small muted">The sensor measures <b>wrist skin</b> temperature; "estimated temperature" = skin + offset. Measure with a thermometer and enter the reading.</p>
+      <div class="row" style="margin-top:8px"><input id="calRef" type="number" step="0.1" placeholder="e.g. 36.8" style="max-width:160px"><button class="primary" id="calBtn">Calibrate</button></div>
+      <p class="small muted" id="calStatus"></p>
+    </div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+'use strict';
+// =================================================================== helpers
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const isNum = v => typeof v === 'number' && isFinite(v);
+const fmt = (v, d = 0) => isNum(v) ? v.toFixed(d) : '--';
+const pct = (v, d = 1) => isNum(v) ? (v * 100).toFixed(d) + ' %' : '--';
+const hms = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const hm = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const dt = t => new Date(t).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const icon = id => `<svg class="i"><use href="#${id}"/></svg>`;
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+const KIND = { sepsis_risk: 'Sepsis risk', device_offline: 'Sensor offline', ecg_leads_off: 'ECG stickers off', no_finger: 'No finger on sensor',
+  hr: 'Heart rate', spo2: 'Blood oxygen', temp: 'Temperature', rr: 'Breathing rate' };
+const VNAME = { HR: 'heart rate', O2Sat: 'SpO₂', Temp: 'temperature', Resp: 'breathing rate' };
+const LVWORD = { low: 'Low', raised: 'Raised', high: 'High' };
+
+const S = { user: null, config: null, model: null, now: null, device: null, deviceAt: 0, live: null, lastLive: 0, wsOk: false,
+  alerts: [], tech: store.get('ss_tech') === '1', view: 'home', histKey: null, upKey: null, started: false };
+
+async function api(path, opts = {}) {
+  const r = await fetch('/api/v1' + path, { headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', ...opts });
+  if (r.status === 401 && !path.startsWith('/auth/')) { showAuth(); throw new Error('please sign in'); }
+  if (!r.ok) { let m = r.status; try { m = (await r.json()).detail || m; } catch (e) {} throw new Error(m); }
+  const ct = r.headers.get('content-type') || '';
+  return ct.includes('json') ? r.json() : r.text();
+}
+const post = (p, b) => api(p, { method: 'POST', body: JSON.stringify(b || {}) });
+
+// =================================================================== auth
+function showAuth() { $('#app').classList.add('hidden'); $('#auth').classList.remove('hidden'); }
+function formData(f) { return Object.fromEntries(new FormData(f).entries()); }
+$('#toSignup').onclick = e => { e.preventDefault(); $('#loginForm').classList.add('hidden'); $('#signupForm').classList.remove('hidden'); $('#authLead').textContent = 'Create your account. Your readings will be stored under it.'; };
+$('#toLogin').onclick = e => { e.preventDefault(); $('#signupForm').classList.add('hidden'); $('#loginForm').classList.remove('hidden'); $('#authLead').textContent = 'Sign in to see your readings and history.'; };
+$('#loginForm').onsubmit = async e => {
+  e.preventDefault(); $('#loginErr').textContent = '';
+  try { S.user = await post('/auth/login', formData(e.target)); startApp(); } catch (err) { $('#loginErr').textContent = err.message; }
+};
+$('#signupForm').onsubmit = async e => {
+  e.preventDefault(); $('#signupErr').textContent = '';
+  const d = formData(e.target); d.age = +d.age; d.gender = +d.gender;
+  try { S.user = await post('/auth/signup', d); startApp(); } catch (err) { $('#signupErr').textContent = err.message; }
+};
+$('#logoutBtn').onclick = async () => { try { await post('/auth/logout'); } catch (e) {} location.reload(); };
+
+// =================================================================== sweep (ECG / PPG strips)
+class Sweep {
+  constructor(canvas, fs, secs, color) {
+    Object.assign(this, { c: canvas, fs, secs, color, q: [], hist: [], pos: 0, prev: null, lo: 0, hi: 1, carry: 0, wait: true, last: performance.now() });
+    this.resize();
+  }
+  resize() {
+    const r = this.c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    this.W = r.width; this.H = r.height;
+    this.c.width = Math.max(1, Math.round(r.width * d)); this.c.height = Math.max(1, Math.round(r.height * d));
+    this.ctx = this.c.getContext('2d'); this.ctx.setTransform(d, 0, 0, d, 0, 0);
+    this.ctx.clearRect(0, 0, this.W, this.H); this.prev = null; this.pos = 0;
+  }
+  push(arr) {
+    for (const v of arr || []) if (isNum(v)) { this.q.push(v); this.hist.push(v); }
+    if (this.hist.length > this.fs * 3) this.hist.splice(0, this.hist.length - this.fs * 3);
+    if (this.q.length > this.fs * 3) this.q.splice(0, this.q.length - this.fs);
+    if (this.hist.length) {
+      let lo = Infinity, hi = -Infinity;
+      for (const v of this.hist) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      const pad = Math.max((hi - lo) * 0.12, 1);
+      this.lo += (lo - pad - this.lo) * 0.5; this.hi += (hi + pad - this.hi) * 0.5;
+    }
+  }
+  frame(now) {
+    let n = (now - this.last) / 1000 * this.fs + this.carry; this.last = now;
+    let k = Math.floor(n); this.carry = n - k;
+    if (this.W < 2) { this.q.length = 0; return; }
+    if (!this.q.length) { this.wait = true; return; }
+    if (this.wait) { if (this.q.length < this.fs * 1.2) return; this.wait = false; }
+    k = Math.min(k, this.q.length); if (k <= 0) return;
+    const ctx = this.ctx, N = this.fs * this.secs, dx = this.W / N, gap = 16, x0 = this.pos * dx;
+    ctx.clearRect(x0, 0, k * dx + gap, this.H);
+    if (x0 + k * dx + gap > this.W) ctx.clearRect(0, 0, x0 + k * dx + gap - this.W, this.H);
+    ctx.strokeStyle = this.color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
+    if (this.prev) ctx.moveTo(this.prev[0], this.prev[1]);
+    const span = (this.hi - this.lo) || 1;
+    for (let i = 0; i < k; i++) {
+      const v = this.q.shift(), x = this.pos * dx, y = this.H - 6 - (v - this.lo) / span * (this.H - 12);
+      if (!this.prev || x < this.prev[0]) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      this.prev = [x, y]; this.pos = (this.pos + 1) % N;
+    }
+    ctx.stroke();
+  }
+}
+
+// =================================================================== line chart
+function niceStep(range, n) { const raw = range / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p; }
+function ticks(a, b, n) { const s = niceStep(b - a || 1, n), out = []; for (let v = Math.ceil(a / s) * s; v <= b + 1e-9; v += s) out.push(+v.toFixed(10)); return out; }
+function autoRange(vals, minSpan, lo = -Infinity, hi = Infinity) {
+  const v = vals.filter(isNum); if (!v.length) return null;
+  let a = Math.min(...v), b = Math.max(...v);
+  if (b - a < minSpan) { const m = (a + b) / 2; a = m - minSpan / 2; b = m + minSpan / 2; }
+  const p = (b - a) * 0.1; return [Math.max(lo, a - p), Math.min(hi, b + p)];
+}
+const CHARTS = [];
+class Chart {
+  constructor(wrap, { h = 140, xFmt = v => v, yFmt = v => v, xTicks = null } = {}) {
+    wrap.classList.add('chart');
+    wrap.innerHTML = '<div class="lg"></div><canvas></canvas><div class="tip"></div>';
+    Object.assign(this, { wrap, h, xFmt, yFmt, xTicks, c: $('canvas', wrap), tip: $('.tip', wrap), lg: $('.lg', wrap), d: null, hx: null });
+    this.c.style.height = h + 'px';
+    this.c.addEventListener('mousemove', e => { this.hx = e.clientX - this.c.getBoundingClientRect().left; this.draw(); });
+    this.c.addEventListener('mouseleave', () => { this.hx = null; this.draw(); });
+    CHARTS.push(this);
+  }
+  set(d) {
+    this.d = d;
+    const ser = (d.series || []).filter(s => !s.noLegend);
+    this.lg.innerHTML = ser.length > 1 ? ser.map(s => `<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('') : '';
+    this.draw();
+  }
+  draw() {
+    const r = this.c.getBoundingClientRect(); if (r.width < 2) return;
+    const dpr = window.devicePixelRatio || 1, W = r.width, H = this.h;
+    this.c.width = Math.round(W * dpr); this.c.height = Math.round(H * dpr);
+    const ctx = this.c.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    const d = this.d; this.tip.style.display = 'none';
+    const L = 44, R = 12, T = 8, B = 22, pw = W - L - R, ph = H - T - B;
+    ctx.font = '12px Segoe UI, system-ui, sans-serif';
+    if (!d || !d.y || d.empty) { ctx.fillStyle = css('--faint'); ctx.textAlign = 'center'; ctx.fillText((d && d.empty) || 'no data yet', W / 2, H / 2); return; }
+    const [x0, x1] = d.x, [y0, y1] = d.y;
+    const X = v => L + (v - x0) / ((x1 - x0) || 1) * pw, Y = v => T + ph - (v - y0) / ((y1 - y0) || 1) * ph;
+    ctx.strokeStyle = css('--grid'); ctx.fillStyle = css('--faint'); ctx.lineWidth = 1; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (const t of ticks(y0, y1, 4)) { const y = Math.round(Y(t)) + .5; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(W - R, y); ctx.stroke(); ctx.fillText(this.yFmt(t), L - 6, y); }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (const t of (this.xTicks ? this.xTicks(x0, x1) : ticks(x0, x1, 5))) ctx.fillText(this.xFmt(t), X(t), T + ph + 5);
+    ctx.save(); ctx.beginPath(); ctx.rect(L, T - 2, pw, ph + 4); ctx.clip();
+    if (d.band && d.band.points.length) {
+      ctx.fillStyle = d.band.color; ctx.beginPath();
+      d.band.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[2])) : ctx.moveTo(X(p[0]), Y(p[2])));
+      [...d.band.points].reverse().forEach(p => ctx.lineTo(X(p[0]), Y(p[1])));
+      ctx.closePath(); ctx.fill();
+    }
+    for (const l of d.hlines || []) {
+      ctx.strokeStyle = l.color; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(L, Y(l.y)); ctx.lineTo(W - R, Y(l.y)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = l.color; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(l.label || '', W - R - 4, Y(l.y) - 2);
+    }
+    for (const l of d.vlines || []) {
+      if (!isNum(l.x) || l.x < x0 || l.x > x1) continue;
+      ctx.strokeStyle = l.color; ctx.setLineDash(l.dash || [4, 3]); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(X(l.x), T); ctx.lineTo(X(l.x), T + ph); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = l.color; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(l.label || '', X(l.x) + 4, T + (l.row || 0) * 15);
+    }
+    for (const s of d.series) {
+      ctx.strokeStyle = s.color; ctx.lineWidth = s.width || 2; ctx.lineJoin = 'round'; ctx.setLineDash(s.dash || []);
+      ctx.beginPath(); let prev = null;
+      for (const p of s.points) {
+        if (!isNum(p[1])) { prev = null; continue; }
+        if (prev === null || (d.gap && p[0] - prev > d.gap)) ctx.moveTo(X(p[0]), Y(p[1])); else ctx.lineTo(X(p[0]), Y(p[1]));
+        prev = p[0];
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+      if (s.dots) { ctx.fillStyle = s.color; for (const p of s.points) if (isNum(p[1])) { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 3, 0, 7); ctx.fill(); } }
+    }
+    ctx.restore();
+    if (this.hx === null || this.hx < L || this.hx > W - R) return;
+    const xv = x0 + (this.hx - L) / pw * (x1 - x0), rows = []; let snapX = null;
+    for (const s of d.series) {
+      let best = null;
+      for (const p of s.points) if (isNum(p[1]) && (!best || Math.abs(p[0] - xv) < Math.abs(best[0] - xv))) best = p;
+      if (!best || (d.snap && Math.abs(best[0] - xv) > d.snap)) continue;
+      snapX = snapX ?? best[0]; rows.push({ s, p: best });
+    }
+    if (!rows.length) return;
+    const cx = X(snapX);
+    ctx.strokeStyle = '#9aa7b2'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, T); ctx.lineTo(cx, T + ph); ctx.stroke();
+    for (const { s, p } of rows) { ctx.fillStyle = s.color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 4.5, 0, 7); ctx.fill(); ctx.stroke(); }
+    this.tip.innerHTML = `<b>${esc(this.xFmt(snapX, true))}</b>` + rows.map(({ s, p }) =>
+      `<div><i style="background:${s.color}"></i>${esc(s.label)}: <b>${esc(this.yFmt(p[1], true))}</b></div>`).join('') + (d.tipExtra ? d.tipExtra(snapX) : '');
+    this.tip.style.display = 'block';
+    const tw = this.tip.offsetWidth;
+    this.tip.style.left = (cx + 14 + tw > W ? cx - tw - 14 : cx + 14) + 'px'; this.tip.style.top = (this.c.offsetTop + 8) + 'px';
+  }
+}
+
+// =================================================================== outlook + per-hour levels (shared)
+function levelOf(r, thr) {
+  const wf = (S.config && S.config.warn_fraction) || 0.6;
+  if (!isNum(r) || !isNum(thr)) return 'none';
+  return r >= thr ? 'high' : r >= wf * thr ? 'raised' : 'low';
+}
+function outlookTiles(list, emptyMsg) {
+  if (!list || !list.length) return `<p class="muted" style="grid-column:1/-1">${esc(emptyMsg)}</p>`;
+  return list.map(o => {
+    const idx = { low: 1, raised: 2, high: 3 }[o.level] || 0, cls = ['', 'g', 'a', 'u'][idx];
+    return `<div class="otile lv-${o.level}"><div class="oh">Next ${o.hours} hours</div><div class="olv">${LVWORD[o.level] || '--'}</div>
+      <div class="meter">${[1, 2, 3].map(i => `<i class="${i <= idx ? cls : ''}"></i>`).join('')}</div>
+      <div class="meterlab"><span>Low</span><span>Raised</span><span>High</span></div>
+      <p>${esc(o.text)}</p>
+      <div class="tech-only">risk ${pct(o.risk)} (band ${pct(o.lo)}–${pct(o.hi)}) · alarm ≥ ${pct(o.threshold)}${isNum(o.times_typical) ? ` · ${o.times_typical.toFixed(1)}× the average ICU hour` : ''}</div></div>`;
+  }).join('');
+}
+function strips(d) {
+  const P = d.predictions || [], th = d.thresholds || {}, info = d.patient || {};
+  if (!P.length) return '<p class="muted">No predictions yet.</p>';
+  const n = P[P.length - 1].hour + 1, total = Math.max(n, info.total_hours || 0);
+  const hs = Object.keys(P[P.length - 1].horizons || { 6: 1 }).sort((a, b) => a - b);
+  const byHour = {}; P.forEach(p => byHour[p.hour] = p);
+  const row = h => `<div class="small muted">within ${h} h</div><div class="strip" style="grid-template-columns:repeat(${total},1fr)">` +
+    Array.from({ length: total }, (_, i) => {
+      const p = byHour[i]; if (!p) return '<i class="none"></i>';
+      const v = p.horizons ? p.horizons[h] : (h === '6' ? { risk: p.risk } : null);
+      const lv = v ? levelOf(v.risk, th[h] ?? d.threshold) : 'none';
+      return `<i class="${lv}" title="hour ${i}: ${LVWORD[lv] || 'n/a'}${v && S.tech ? ' · ' + pct(v.risk) : ''}"></i>`;
+    }).join('') + '</div>';
+  let marks = '';
+  if (isNum(info.onset_hour) || isNum(info.label_start_hour)) {
+    marks = `<div class="small muted">recorded</div><div class="strip marks" style="grid-template-columns:repeat(${total},1fr)">` +
+      Array.from({ length: total }, (_, i) => i === info.onset_hour ? '<i class="m" data-m="▲ sepsis onset"></i>'
+        : (i === info.label_start_hour && S.tech ? '<i class="m ls" data-m="▲ −6 h"></i>' : '<i></i>')).join('') + '</div>';
+  }
+  return `<div class="strips">${hs.map(row).join('')}${marks}<div></div><div class="axis"><span>hour 0</span><span>hour ${Math.round(total / 2)}</span><span>hour ${total - 1}</span></div></div>
+    <div class="legend"><span><b style="background:#7fcf9f"></b>Low</span><span><b style="background:#f1c060"></b>Raised</span><span><b style="background:#e2554b"></b>High (alarm level)</span><span><b style="background:var(--grid)"></b>no data</span></div>`;
+}
+// detail view for a session / upload / replay (history, upload result, replay)
+const DETAIL_CHARTS = new Map();
+function renderDetail(el, d, key, title) {
+  const info = d.patient || {}, P = d.predictions || [], H = d.hourly || [], last = H[H.length - 1] || {};
+  const isSess = key.startsWith('sess:'), isRep = key.startsWith('replay:');
+  const sub = isSess ? `Monitoring from ${dt(info.start_ms)}${info.end_ms ? ' to ' + hm(info.end_ms) : ' (running)'}`
+    : isRep ? `Recorded ICU patient, ${info.total_hours ?? '?'} hours · age ${fmt(info.age)} · ${info.gender === 1 ? 'male' : 'female'}`
+      : `Uploaded ${dt(info.created_ms)} · ${info.n_hours} hourly rows · age ${fmt(info.age)} · ${info.gender === 1 ? 'male' : 'female'}`;
+  let outcome = '';
+  if (isNum(info.onset_hour)) outcome = `<p class="small"><b>Recorded outcome:</b> sepsis onset at hour ${info.onset_hour} (dataset label).</p>`;
+  else if (isRep || info.label_start_hour === null && 'label_start_hour' in info && !isSess) outcome = isRep ? '<p class="small"><b>Recorded outcome:</b> no sepsis during the stay.</p>' : '';
+  el.innerHTML = `<div class="row spread"><div><h2>${esc(title || info.name || 'Details')}</h2><p class="small muted">${esc(sub)}</p></div>
+      <a class="small" href="/api/v1/export/${encodeURIComponent(key)}.csv">Download CSV</a></div>
+    ${outcome}
+    <h3 style="margin-top:10px">Latest outlook${P.length ? ` (hour ${P[P.length - 1].hour})` : ''}</h3>
+    <div class="outlook">${outlookTiles(d.outlook, 'No outlook yet.')}</div>
+    <h3 style="margin-top:16px">Outlook hour by hour</h3>${strips(d)}
+    <div class="tech-only"><h3 style="margin-top:16px">6 h risk (%)</h3><div class="dchart"></div>
+      <h3 style="margin-top:12px">Last hour's vitals</h3>
+      <p class="small mono">HR ${fmt(last.HR)} · SpO₂ ${fmt(last.O2Sat)} · Temp ${fmt(last.Temp, 1)} · Resp ${fmt(last.Resp)}${isNum(last.SBP) ? ' · SBP ' + fmt(last.SBP) + ' (not used by the model)' : ''}${last.label != null ? ' · dataset label ' + last.label : ''}</p></div>`;
+  const ch = new Chart($('.dchart', el), { h: 180, xFmt: (v, t) => t ? 'hour ' + v : String(v), yFmt: (v, t) => t ? v.toFixed(1) + ' %' : v + '%' });
+  if (DETAIL_CHARTS.has(el)) { const i = CHARTS.indexOf(DETAIL_CHARTS.get(el)); if (i >= 0) CHARTS.splice(i, 1); }
+  DETAIL_CHARTS.set(el, ch);
+  if (!P.length) { ch.set({ series: [], empty: 'no predictions yet' }); return; }
+  const thr = d.threshold, maxH = Math.max(6, P[P.length - 1].hour, (info.total_hours || 0) - 1);
+  const hi = Math.max(...P.map(p => isNum(p.risk_hi) ? p.risk_hi : p.risk), thr * 1.5) * 100;
+  const vl = [];
+  if (isNum(info.label_start_hour)) vl.push({ x: info.label_start_hour, color: css('--attn'), label: 'label start (onset − 6 h)', row: 0 });
+  if (isNum(info.onset_hour)) vl.push({ x: info.onset_hour, color: css('--urgent'), label: 'sepsis onset', dash: [], row: 1 });
+  ch.set({ x: [0, maxH], y: [0, Math.min(100, hi * 1.15)], snap: 0.6,
+    series: [{ label: '6 h risk', color: css('--risk'), dots: P.length < 80, points: P.map(p => [p.hour, p.risk * 100]) }],
+    band: { color: 'rgba(19,33,44,.10)', points: P.filter(p => isNum(p.risk_lo)).map(p => [p.hour, p.risk_lo * 100, p.risk_hi * 100]) },
+    hlines: [{ y: thr * 100, color: css('--urgent'), label: 'alarm ' + pct(thr) }], vlines: vl,
+    tipExtra: x => { const p = P.find(p => p.hour === x); return p && p.quality ? `<div class="faint">input quality: ${esc(p.quality.level)}</div>` : ''; } });
+}
+
+// =================================================================== HOME
+function renderHome() {
+  const n = S.now; if (!n) return;
+  const sess = n.session;
+  $('#startCard').classList.toggle('hidden', !!n.monitoring);
+  $('#sessionBar').classList.toggle('hidden', !n.monitoring);
+  $('#startText').textContent = n.someone_else_monitoring
+    ? 'The sensor is currently being used for another patient. Starting will end their session and link it to you.'
+    : (n.device.online ? 'The sensor is connected. Press Start to link it to your account; your readings are then saved to your history.'
+      : 'Put the sensors on and switch the sensor box on, then press Start. Your readings are saved to your account.');
+  if (sess) {
+    const sph = n.seconds_per_model_hour, hr = n.prediction ? n.prediction.hour : null;
+    $('#sessionText').textContent = `Monitoring since ${hm(sess.start_ms)}` + (hr !== null ? ` · model hour ${hr}` : '') + (sph !== 3600 ? ` · demo time: 1 hour = ${sph} s` : '');
+  }
+  const now = n.now || {}, lv = now.level || 'unknown';
+  $('#hero').className = 'hero lv-' + lv;
+  $('#hero .ic').innerHTML = icon({ normal: 'i-ok', attention: 'i-warn', urgent: 'i-stop' }[lv] || 'i-wait');
+  $('#heroHead').textContent = n.monitoring || !n.someone_else_monitoring ? (now.headline || '') : 'Not monitoring you right now';
+  $('#heroText').textContent = n.monitoring || !n.someone_else_monitoring ? (now.text || '') : 'Press Start monitoring when you have the sensors on.';
+  $('#heroHints').innerHTML = (now.hints || []).map(h => `<li>${esc(h)}</li>`).join('');
+  const V = { hr: ['i-heart', '--ecg', 'beats/min', 0], spo2: ['i-drop', '--spo2', '%', 0], temp: ['i-temp', '--temp', '°C', 1], rr: ['i-wind', '--resp', '/min', 0] };
+  const ST = { normal: ['Normal', 'lv-normal'], attention: ['Outside normal range', 'lv-attention'], urgent: ['Far outside normal', 'lv-urgent'], unknown: ['No reading', 'lv-unknown'] };
+  const raw = n.vitals || {}, L = S.live && Date.now() - S.lastLive < 5000 ? S.live : null, lvv = (L && L.vitals) || {}, lq = (L && L.sqi) || {};
+  const techLine = {
+    hr: `ECG ${fmt(lvv.hr_ecg)} · PPG ${fmt(lvv.hr_ppg)} · ${lq.hr_agree ? 'agree ✓' : 'agreement n/a'} · HRV (RMSSD) ${fmt(raw.hrv)} ms`,
+    spo2: `PPG quality ${pct(lq.ppg, 0)} · not calibrated`,
+    temp: `wrist skin ${fmt(raw.skin, 1)} °C + offset ${fmt(S.config && S.config.temp_offset_c, 1)} °C`,
+    rr: `estimate quality ${pct(raw.rr_quality, 0)} · from ECG + PPG`,
+  };
+  $('#vitals').innerHTML = (now.vitals || []).map(v => {
+    const [ic, col, unit, dd] = V[v.kind], [word, cls] = ST[v.level] || ST.unknown;
+    return `<div class="vcard" style="--c:var(${col})"><div class="top">${icon(ic)}${esc(v.name)}</div>
+      <div class="val">${isNum(v.value) ? v.value.toFixed(dd) : '--'}<small>${unit}</small></div>
+      <span class="st ${cls}">${word}</span><p>${esc(v.text)}</p><p class="faint small" style="margin-top:4px">Normal: ${esc(v.normal)}</p>
+      <div class="tech-only">${techLine[v.kind]}</div></div>`;
+  }).join('');
+  const ol = $('#outlook');
+  if (!n.model_loaded) ol.innerHTML = '<p class="muted" style="grid-column:1/-1">The prediction model is not installed yet (run 02_ML/train.py).</p>';
+  else if (!n.monitoring) ol.innerHTML = '<p class="muted" style="grid-column:1/-1">Start monitoring to get your outlook.</p>';
+  else ol.innerHTML = outlookTiles(n.outlook, 'Collecting readings — your first outlook appears within about a minute.');
+  const q = n.prediction && n.prediction.quality;
+  $('#outlookNote').textContent = (q && q.level !== 'good' ? `Based on incomplete readings (missing: ${q.missing.map(m => VNAME[m] || m).join(', ')}). ` : '') +
+    'A research model trained on hospital ICU records estimates these chances. "High" means its alarm level was reached — most such alarms in testing were false.';
+  renderTechRisk();
+}
+function renderTechRisk() {
+  const p = S.now && S.now.prediction;
+  if (!p) { $('#riskBig').textContent = '--'; $('#riskSub').textContent = 'no prediction yet'; $('#rUp').innerHTML = $('#rDown').innerHTML = ''; return; }
+  $('#riskBig').textContent = pct(p.risk);
+  $('#riskSub').innerHTML = `6 h risk · band ${pct(p.risk_lo)}–${pct(p.risk_hi)}<br>alarm threshold ${pct(S.config && S.config.effective_alarm_threshold)}`;
+  $('#riskQ').textContent = p.quality ? 'input quality: ' + p.quality.level : '';
+  const list = (el, items) => { const mx = Math.max(1e-9, ...items.map(r => Math.abs(r.effect)));
+    el.innerHTML = items.length ? items.map(r => `<li>${esc(r.label)} <span class="faint mono">${isNum(r.value) ? '= ' + (+r.value.toFixed(2)) : ''}</span><div class="rbar" style="width:${Math.max(6, Math.abs(r.effect) / mx * 100)}%"></div></li>`).join('') : '<li class="faint">—</li>'; };
+  list($('#rUp'), (p.reasons && p.reasons.raising) || []); list($('#rDown'), (p.reasons && p.reasons.lowering) || []);
+}
+const liveRiskChart = new Chart($('#liveRiskChart'), { h: 160, xFmt: (v, t) => t ? 'hour ' + v : String(v), yFmt: (v, t) => t ? v.toFixed(1) + ' %' : v + '%' });
+async function refreshLiveRisk() {
+  const s = S.now && S.now.session; if (!s || !S.tech) return;
+  let d; try { d = await api(`/patients/${encodeURIComponent(s.key)}/hourly`); } catch (e) { return; }
+  const P = d.predictions || []; if (!P.length) { liveRiskChart.set({ series: [], empty: 'no predictions yet' }); return; }
+  const thr = d.threshold, hi = Math.max(...P.map(p => p.risk_hi ?? p.risk), thr * 1.5) * 100;
+  liveRiskChart.set({ x: [0, Math.max(6, P[P.length - 1].hour)], y: [0, Math.min(100, hi * 1.15)], snap: 0.6,
+    series: [{ label: '6 h risk', color: css('--risk'), dots: P.length < 80, points: P.map(p => [p.hour, p.risk * 100]) }],
+    band: { color: 'rgba(19,33,44,.10)', points: P.filter(p => isNum(p.risk_lo)).map(p => [p.hour, p.risk_lo * 100, p.risk_hi * 100]) },
+    hlines: [{ y: thr * 100, color: css('--urgent'), label: 'alarm ' + pct(thr) }] });
+}
+let nowBusy = false;
+async function refreshNow() {
+  if (nowBusy) return; nowBusy = true;
+  try { S.now = await api('/me/now'); renderHome(); } catch (e) {} finally { nowBusy = false; }
+}
+$('#startBtn').onclick = async () => { $('#startBtn').disabled = true; try { await post('/monitor/start'); } catch (e) { alert(e.message); } $('#startBtn').disabled = false; refreshNow(); };
+$('#stopBtn').onclick = async () => { if (!confirm('Stop monitoring? Your readings so far stay in your history.')) return; try { await post('/monitor/stop'); } catch (e) {} refreshNow(); };
+
+// ---- technical: sweeps, live numbers, quality, device, trends
+const ecgSweep = new Sweep($('#ecgCanvas'), 250, 5, '#3ee07f');
+const ppgSweep = new Sweep($('#ppgCanvas'), 25, 5, '#22d3ee');
+(function loop(now) { ecgSweep.frame(now); ppgSweep.frame(now); requestAnimationFrame(loop); })(performance.now());
+function renderLive() {
+  const m = S.live, stale = !m || Date.now() - S.lastLive > 5000, v = (m && m.vitals) || {}, q = (m && m.sqi) || {};
+  $('#ecgFlag').classList.toggle('on', !stale && !!q.leads_off);
+  $('#ppgFlag').classList.toggle('on', !stale && !q.finger);
+  $('#liveInfo').textContent = stale ? 'no live data' : 'live · ' + hms(m.t_ms);
+  const kv = [['HR (ECG)', fmt(v.hr_ecg)], ['HR (PPG)', fmt(v.hr_ppg)], ['SpO₂', fmt(v.spo2)], ['Skin °C', fmt(v.skin_temp, 2)],
+    ['Est. core °C', fmt(m && m.temp_core_est, 1)], ['Resp /min', fmt(m && m.rr, 1)], ['RMSSD ms', fmt(v.rmssd)], ['Ambient °C', fmt(v.amb_temp, 1)]];
+  $('#liveKv').innerHTML = stale ? '' : kv.map(([k, x]) => `<dt>${k}</dt><dd>${x}</dd>`).join('');
+}
+function qbar(label, v, note) {
+  const col = !isNum(v) ? css('--faint') : v >= 0.7 ? css('--good') : v >= 0.4 ? '#e6a23c' : css('--urgent');
+  const word = !isNum(v) ? 'n/a' : v >= 0.7 ? 'good' : v >= 0.4 ? 'fair' : 'poor';
+  return `<div class="qbar"><div class="t"><span>${label}</span><span class="mono">${pct(v, 0)} <span class="faint">${word}</span></span></div>
+    <div class="track"><div class="fill" style="width:${isNum(v) ? v * 100 : 0}%;background:${col}"></div></div>${note ? `<div class="faint" style="font-size:11.5px">${note}</div>` : ''}</div>`;
+}
+function renderQuality() {
+  const q = (S.live && Date.now() - S.lastLive < 5000) ? S.live.sqi || {} : {}, r = (S.device && S.device.quality_60s) || {}, ok = (r.n || 0) > 0;
+  $('#qual').innerHTML = qbar('ECG (now)', q.ecg) + qbar('PPG (now)', q.ppg) + qbar('Temperature (now)', q.temp) +
+    qbar('ECG stickers on (60 s)', ok && isNum(r.lo) ? 1 - r.lo : null) + qbar('Finger present (60 s)', ok ? r.f : null) +
+    qbar('ECG/PPG HR agree (60 s)', ok ? r.ag : null, ok ? `${r.n} records in the last 60 s` : 'no records in the last 60 s');
+}
+function renderDevice() {
+  const d = S.device, chip = $('#sensorChip'), dc = $('#devChip');
+  $('#simChip').classList.toggle('hidden', !(d && d.device_id === 'simulator'));
+  const since = d && isNum(d.seconds_since_seen) ? d.seconds_since_seen + (Date.now() - S.deviceAt) / 1000 : null;
+  const offS = (S.config && S.config.device_offline_seconds) || 10, online = S.wsOk && isNum(since) && since <= offS;
+  if (!S.wsOk) { chip.className = 'chip bad'; chip.textContent = 'Server disconnected'; }
+  else if (!d || !d.device_id) { chip.className = 'chip idle'; chip.textContent = 'Sensor: not connected yet'; }
+  else { chip.className = 'chip ' + (online ? 'ok' : 'bad'); chip.textContent = online ? 'Sensor connected' : 'Sensor offline'; }
+  dc.className = chip.className; dc.textContent = chip.textContent;
+  if (!d || !d.device_id) { $('#devKv').innerHTML = '<dt>Status</dt><dd>waiting for the first telemetry</dd>'; $('#outages').textContent = '—'; return; }
+  const kv = [['Device', `${esc(d.device_id)}${d.device_id === 'simulator' ? ' (synthetic)' : ''}`], ['Firmware / boot', `${esc(d.fw ?? '--')} / ${esc(d.boot_id ?? '--')}`],
+    ['Last seen', isNum(since) ? `${since.toFixed(1)} s ago` : '--'], ['Wi-Fi RSSI', isNum(d.rssi) ? `${d.rssi} dBm` : '--'],
+    ['Records received', d.received ?? '--'], ['Gaps (missing seq)', d.gaps ?? '--'], ['Loss', isNum(d.loss_pct) ? d.loss_pct.toFixed(2) + ' %' : '--'],
+    ['Late (re-sent from buffer)', d.late ?? '--'], ['Duplicates ignored', d.duplicates ?? '--'], ['Device backlog', d.backlog ?? '--']];
+  $('#devKv').innerHTML = kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const o = (d.outages || []).slice(-5).reverse();
+  $('#outages').innerHTML = o.length ? o.map(([a, b]) => `${hms(a)} → ${hms(b)} <span class="faint">(${((b - a) / 1000).toFixed(0)} s)</span>`).join('<br>') : 'none recorded';
+}
+const tFmt = (v, tip) => tip ? hms(v) : hm(v);
+const tTicks = (a, b) => { const out = [], s = 5 * 60000; for (let t = Math.ceil(a / s) * s; t <= b; t += s) out.push(t); return out; };
+const trHr = new Chart($('#trHr'), { h: 130, xFmt: tFmt, xTicks: tTicks, yFmt: (v, t) => t ? v.toFixed(0) + ' bpm' : v });
+const trSpo2 = new Chart($('#trSpo2'), { h: 130, xFmt: tFmt, xTicks: tTicks, yFmt: (v, t) => t ? v.toFixed(0) + ' %' : v });
+const trTemp = new Chart($('#trTemp'), { h: 130, xFmt: tFmt, xTicks: tTicks, yFmt: (v, t) => t ? v.toFixed(2) + ' °C' : v });
+const trRr = new Chart($('#trRr'), { h: 130, xFmt: tFmt, xTicks: tTicks, yFmt: (v, t) => t ? v.toFixed(1) + ' /min' : v });
+async function refreshTrends() {
+  const s = S.now && S.now.session; if (!S.tech || S.view !== 'home') return;
+  if (!s) { [trHr, trSpo2, trTemp, trRr].forEach(c => c.set({ series: [], empty: 'start monitoring to record trends' })); return; }
+  let d; try { d = await api(`/patients/${encodeURIComponent(s.key)}/series?minutes=30`); } catch (e) { return; }
+  const V = d.vitals || [], Rr = d.resp || [], now = Date.now(), x = [now - 30 * 60000, now];
+  const pick = (val, sq) => V.map(r => [r.t_ms, (r[sq] ?? 0) >= 0.5 ? r[val] : null]);
+  const hrE = pick('hr_ecg', 'sqi_ecg'), hrP = pick('hr_ppg', 'sqi_ppg'), sp = pick('spo2', 'sqi_ppg'), tc = pick('temp_core_est', 'sqi_temp'), ts = pick('skin_temp', 'sqi_temp');
+  const rr = Rr.map(r => [r.t_ms, (r.quality ?? 0) >= 0.3 ? r.rr : null]), ys = a => a.map(p => p[1]), C = S.config || {};
+  const lim = (y, l) => isNum(y) ? [{ y, color: 'rgba(163,95,0,.7)', label: l }] : [];
+  const empty = V.length ? null : 'no readings in the last 30 min';
+  trHr.set({ x, gap: 15000, empty, y: autoRange([...ys(hrE), ...ys(hrP)], 20), series: [{ label: 'HR (ECG)', color: css('--ecg'), points: hrE }, { label: 'HR (PPG)', color: css('--hr2'), dash: [4, 3], width: 1.5, points: hrP }], hlines: [...lim(C.hr_high, 'high ' + C.hr_high), ...lim(C.hr_low, 'low ' + C.hr_low)] });
+  trSpo2.set({ x, gap: 15000, empty, y: autoRange(ys(sp), 6, 0, 100.5), series: [{ label: 'SpO₂', color: css('--spo2'), points: sp }], hlines: lim(C.spo2_low, 'low ' + C.spo2_low) });
+  trTemp.set({ x, gap: 15000, empty, y: autoRange([...ys(tc), ...ys(ts)], 2), series: [{ label: 'est. core', color: css('--temp'), points: tc }, { label: 'wrist skin', color: css('--temp2'), dash: [4, 3], width: 1.5, points: ts }], hlines: lim(C.temp_high, 'high ' + C.temp_high) });
+  trRr.set({ x, gap: 20000, empty: Rr.length ? null : 'no breathing-rate estimates yet', y: autoRange(ys(rr), 8, 0), series: [{ label: 'breathing rate', color: css('--resp'), points: rr }], hlines: lim(C.rr_high, 'high ' + C.rr_high) });
+}
+
+// =================================================================== HISTORY
+async function refreshHistory() {
+  let h; try { h = await api('/me/history'); } catch (e) { return; }
+  const items = [...h.sessions.map(s => ({ ...s, t: s.start_ms, label: 'Monitoring session', sub: `${dt(s.start_ms)}${s.end_ms ? ' – ' + hm(s.end_ms) : ' · running'} · ${s.hours} model h` })),
+    ...h.uploads.map(u => ({ ...u, t: u.created_ms, label: u.name, sub: `Recording · ${dt(u.created_ms)} · ${u.n_hours} h` }))].sort((a, b) => b.t - a.t);
+  $('#histList').innerHTML = items.length ? items.map(i => `<button class="item${i.key === S.histKey ? ' on' : ''}" data-hist="${esc(i.key)}"><b>${esc(i.label)}
+      <span class="dots">${(i.outlook || []).map(o => `<i class="${o.level}" title="${o.hours} h: ${LVWORD[o.level]}"></i>`).join('')}</span></b>
+      <span class="small muted">${esc(i.sub)}</span></button>`).join('')
+    : '<p class="muted">Nothing yet. Start monitoring on the Home tab, or check a recording.</p>';
+  if (!S.histKey && items.length) openHistory(items[0].key);
+}
+async function openHistory(key) {
+  S.histKey = key; $$('#histList .item').forEach(b => b.classList.toggle('on', b.dataset.hist === key));
+  try { const d = await api(`/patients/${encodeURIComponent(key)}/hourly`); renderDetail($('#histDetail'), d, key, key.startsWith('sess:') ? 'Monitoring session' : null); }
+  catch (e) { $('#histDetail').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-hist]'); if (b) openHistory(b.dataset.hist); });
+
+// =================================================================== UPLOAD
+let upText = null, upName = '';
+function takeFile(f) {
+  if (!f) return; upName = f.name; $('#upFileName').textContent = f.name; $('#upErr').textContent = '';
+  const r = new FileReader(); r.onload = () => { upText = r.result; $('#upBtn').disabled = false; }; r.readAsText(f);
+}
+$('#upFile').onchange = e => takeFile(e.target.files[0]);
+const drop = $('#drop');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); takeFile(e.dataTransfer.files[0]); });
+$('#upBtn').onclick = async () => {
+  if (!upText) return;
+  $('#upBtn').disabled = true; $('#upBtn').textContent = 'Analysing…'; $('#upErr').textContent = '';
+  try {
+    const age = parseFloat($('#upAge').value);
+    const r = await post('/uploads', { name: upName, content: upText, age: isNum(age) ? age : null, gender: +$('#upSex').value });
+    S.upKey = r.key; S.histKey = r.key;
+    const d = await api(`/patients/${encodeURIComponent(r.key)}/hourly`);
+    renderDetail($('#upDetail'), d, r.key, upName);
+  } catch (e) { $('#upErr').textContent = e.message; }
+  $('#upBtn').disabled = false; $('#upBtn').textContent = 'Analyse recording';
+};
+
+// =================================================================== ALERTS
+async function refreshAlerts() {
+  try { S.alerts = await api('/alerts?limit=200'); } catch (e) { return; }
+  const act = S.alerts.filter(a => a.end_ms == null).sort((a, b) => (b.severity === 'alarm') - (a.severity === 'alarm') || b.start_ms - a.start_ms);
+  const who = p => p === 'device' ? 'Sensor' : p.startsWith('replay:') ? 'Replay ' + p.slice(7) : p.startsWith('sess:') ? 'You (live)' : 'Recording';
+  const sms = a => !a.sms ? '' : a.sms.ok ? '<span style="color:var(--good)">SMS sent ✓</span>' : `<span class="faint" title="${esc(a.sms.detail)}">SMS not sent</span>`;
+  $('#alertBadge').innerHTML = act.length ? `<span class="chip ${act.some(a => a.severity === 'alarm') ? 'bad' : 'idle'}" style="padding:0 7px">${act.length}</span>` : '';
+  $('#alertCount').textContent = act.length ? `${act.length} active` : '';
+  $('#activeAlerts').innerHTML = act.length ? act.map(a => `<div class="alert ${a.severity}"><span class="sev ${a.severity}">${a.severity === 'alarm' ? 'ALARM' : 'WARNING'}</span>
+      <div class="msg"><b>${esc(KIND[a.kind] || a.kind)}</b> — ${esc(a.message)}<small>${who(a.patient)} · since ${hms(a.start_ms)} ${sms(a)}${a.acked ? ' · acknowledged' : ''}</small></div>
+      ${a.acked ? '<span class="faint">✓</span>' : `<button data-ack="${a.id}">Acknowledge</button>`}</div>`).join('') : '<p class="muted">No active alerts.</p>';
+  $('#alertHist').innerHTML = '<tr><th>Started</th><th>Who</th><th>Alert</th><th>Ended</th><th>Phone</th></tr>' + S.alerts.slice(0, 100).map(a => `
+    <tr><td class="mono">${dt(a.start_ms)}</td><td>${who(a.patient)}</td><td><span class="sev ${a.severity}">${a.severity === 'alarm' ? 'ALARM' : 'WARN'}</span> ${esc(KIND[a.kind] || a.kind)}<div class="faint small">${esc(a.message)}</div></td>
+      <td class="mono">${a.end_ms ? hms(a.end_ms) : '<b style="color:var(--attn)">active</b>'}</td><td class="small">${sms(a)}</td></tr>`).join('');
+  const un = act.filter(a => a.severity === 'alarm' && !a.acked);
+  $('#alarmBar').classList.toggle('on', un.length > 0);
+  $('#alarmBar').textContent = un.length ? `ALARM — ${KIND[un[0].kind] || un[0].kind}: ${un[0].message}` + (un.length > 1 ? ` (+${un.length - 1} more)` : '') + ' — see Alerts' : '';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-ack]'); if (!b) return;
+  b.disabled = true; try { await post(`/alerts/${b.dataset.ack}/ack`); } catch (err) {} refreshAlerts();
+});
+
+// =================================================================== sample recordings (held-out PhysioNet patients)
+async function refreshSamples() {
+  let cases; try { cases = await api('/replay/cases'); } catch (e) { return; }
+  $('#sampleLinks').innerHTML = cases.map(c => `<a href="/api/v1/replay/${encodeURIComponent(c.pid)}.csv">${esc(c.pid)}.csv</a> <span class="faint">(${c.hours} h, ${c.septic ? 'sepsis' : 'no sepsis'})</span>`).join('<br>') || '<span class="faint">none available</span>';
+}
+
+// =================================================================== SETTINGS
+const FIELDS = [
+  ['alarm_threshold', 'Alarm threshold, 6 h risk (%)', 'pct', 'blank = model threshold'], ['warn_fraction', 'Warn at × threshold', 'num'],
+  ['alarm_persist_hours', 'Alarm persistence (model hours)', 'int'], ['hr_high', 'HR high (bpm)', 'num'], ['hr_low', 'HR low (bpm)', 'num'],
+  ['spo2_low', 'SpO₂ low (%)', 'num'], ['temp_high', 'Temp high (°C, est.)', 'num'], ['temp_low', 'Temp low (°C, est.)', 'num'],
+  ['rr_high', 'Breathing rate high (/min)', 'num'], ['vital_alert_seconds', 'Vital window (s)', 'int', 'median over this window'],
+  ['device_offline_seconds', 'Sensor offline after (s)', 'int'], ['seconds_per_model_hour', 'Seconds per model hour', 'int', '3600 = real time'],
+  ['replay_seconds_per_hour', 'Replay default (s / hour)', 'num'], ['temp_offset_c', 'Skin → core offset (°C)', 'num', 'set by calibration'],
+];
+function renderConfig() {
+  const c = S.config; if (!c) return;
+  $('#cfgForm').innerHTML = FIELDS.map(([k, lab, t, hint]) => {
+    let v = c[k]; if (t === 'pct') v = isNum(v) ? +(v * 100).toFixed(3) : '';
+    const h = k === 'alarm_threshold' ? `${hint} (${pct(c.model_threshold, 2)}); now ${pct(c.effective_alarm_threshold, 2)}` : hint;
+    return `<label class="f">${lab}<input data-k="${k}" data-t="${t}" type="number" step="any" value="${v ?? ''}">${h ? `<span class="hint">${esc(h)}</span>` : ''}</label>`;
+  }).join('');
+  $('#sEnabled').checked = !!c.sms_enabled; $('#sUrl').value = c.sms_gateway_url || ''; $('#sUser').value = c.sms_user || '';
+  $('#sPass').value = c.sms_pass || ''; $('#sCc').value = c.sms_country_code || '+91'; $('#sGap').value = c.sms_min_interval_min ?? 15;
+  const s = c.seconds_per_model_hour, demo = isNum(+s) && +s !== 3600;
+  $('#demoChip').classList.toggle('hidden', !demo); $('#demoChip').textContent = demo ? `DEMO TIME · 1 h = ${s} s` : 'DEMO TIME';
+  $('#sphNow').textContent = `now: ${s} s per model hour`;
+}
+async function loadConfig() { try { S.config = await api('/config'); renderConfig(); } catch (e) {} }
+function ok(el, msg) { el.textContent = msg; el.style.color = css('--good'); }
+function bad(el, msg) { el.textContent = msg; el.style.color = css('--urgent'); }
+async function putConfig(body, el) {
+  try { S.config = await api('/config', { method: 'PUT', body: JSON.stringify(body) }); renderConfig(); if (el) ok(el, 'saved ✓'); refreshNow(); }
+  catch (e) { if (el) bad(el, 'error: ' + e.message); }
+}
+$('#cfgSave').onclick = () => {
+  const body = {};
+  for (const i of $$('#cfgForm input')) { const t = i.dataset.t, s = i.value.trim();
+    if (t === 'pct') body[i.dataset.k] = s === '' ? null : +s / 100; else if (s !== '') body[i.dataset.k] = t === 'int' ? Math.round(+s) : +s; }
+  putConfig(body, $('#cfgStatus'));
+};
+$$('[data-sph]').forEach(b => b.onclick = () => putConfig({ seconds_per_model_hour: +b.dataset.sph }, $('#cfgStatus')));
+$('#sSave').onclick = () => putConfig({ sms_enabled: $('#sEnabled').checked, sms_gateway_url: $('#sUrl').value.trim(), sms_user: $('#sUser').value.trim(),
+  sms_pass: $('#sPass').value, sms_country_code: $('#sCc').value.trim() || '+91', sms_min_interval_min: +$('#sGap').value || 0 }, $('#sStatus'));
+$('#sTest').onclick = async () => {
+  const el = $('#sStatus'); el.textContent = 'sending…'; el.style.color = '';
+  try { const r = await post('/sms/test'); r.ok ? ok(el, `test SMS sent to ${r.phone} ✓`) : bad(el, `not sent: ${r.detail}`); } catch (e) { bad(el, e.message); }
+};
+$('#calBtn').onclick = async () => {
+  const v = parseFloat($('#calRef').value), el = $('#calStatus');
+  if (!isNum(v)) { bad(el, 'enter a reference temperature'); return; }
+  try { const r = await post('/temp/calibrate', { reference_c: v }); ok(el, `offset set to ${r.temp_offset_c.toFixed(2)} °C (wrist skin ${r.skin_median.toFixed(2)} °C)`); loadConfig(); }
+  catch (e) { bad(el, 'failed: ' + e.message); }
+};
+function renderProfile() {
+  const u = S.user; if (!u) return;
+  $('#userName').textContent = u.name; $('#pName').value = u.name; $('#pPhone').value = u.phone; $('#pAge').value = u.age;
+  $('#pSex').value = String(u.gender); $('#pSms').checked = !!u.sms; $('#upAge').value = u.age; $('#upSex').value = String(u.gender);
+}
+$('#pSave').onclick = async () => {
+  try { S.user = await api('/auth/me', { method: 'PUT', body: JSON.stringify({ name: $('#pName').value, phone: $('#pPhone').value, age: +$('#pAge').value, gender: +$('#pSex').value, sms: $('#pSms').checked }) });
+    renderProfile(); ok($('#pStatus'), 'saved ✓'); } catch (e) { bad($('#pStatus'), e.message); }
+};
+
+// =================================================================== websocket
+function setConn(okk) { S.wsOk = okk; renderDevice(); }
+let refreshTimer = null;
+const soon = fn => { clearTimeout(refreshTimer); refreshTimer = setTimeout(fn, 250); };
+const H = {
+  live(m) { S.live = m; S.lastLive = Date.now(); if (S.tech) { ecgSweep.push(m.ecg && m.ecg.samples); ppgSweep.push(m.ppg && m.ppg.ir); } renderLive(); },
+  prediction(m) {
+    const s = S.now && S.now.session;
+    if (s && m.patient === s.key) { refreshNow(); refreshLiveRisk(); }
+  },
+  alert() { soon(() => { refreshAlerts(); refreshNow(); }); },
+  notification() { refreshAlerts(); },
+  status(m) { S.device = m.device; S.deviceAt = Date.now(); renderDevice(); },
+};
+function connect() {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onopen = () => setConn(true);
+  ws.onclose = e => { setConn(false); if (e.code === 4401) return showAuth(); setTimeout(connect, 2000); };
+  ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (err) { return; } (H[m.type] || (() => {}))(m); };
+}
+
+// =================================================================== tabs, timers, start
+function setTech(on) {
+  S.tech = on; document.body.classList.toggle('tech', on); $('#techToggle').checked = on; store.set('ss_tech', on ? '1' : '0');
+  requestAnimationFrame(() => { ecgSweep.resize(); ppgSweep.resize(); CHARTS.forEach(c => c.draw()); });
+  if (on) { refreshTrends(); refreshLiveRisk(); }
+  if (S.view === 'history' && S.histKey) openHistory(S.histKey);
+}
+$('#techToggle').onchange = e => setTech(e.target.checked);
+function show(v) {
+  S.view = v;
+  $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
+  if (v === 'home') { refreshNow(); requestAnimationFrame(() => { ecgSweep.resize(); ppgSweep.resize(); }); refreshTrends(); refreshLiveRisk(); }
+  if (v === 'history') refreshHistory();
+  if (v === 'upload') refreshSamples();
+  if (v === 'alerts') refreshAlerts();
+  if (v === 'settings') { loadConfig(); renderProfile(); }
+  requestAnimationFrame(() => CHARTS.forEach(c => c.draw()));
+}
+$$('#tabs button').forEach(b => b.onclick = () => show(b.dataset.v));
+let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { ecgSweep.resize(); ppgSweep.resize(); CHARTS.forEach(c => c.draw()); }, 150); });
+
+function startApp() {
+  $('#auth').classList.add('hidden'); $('#app').classList.remove('hidden');
+  renderProfile(); setTech(S.tech);
+  if (S.started) { if (!S.wsOk) connect(); show('home'); return; }
+  S.started = true;
+  connect(); loadConfig().then(refreshNow); refreshAlerts(); refreshSamples();
+  setInterval(() => { renderDevice(); renderLive(); if (S.tech) renderQuality(); }, 1000);
+  setInterval(() => { if (S.view === 'home') refreshNow(); }, 3000);
+  setInterval(refreshTrends, 5000);
+  setInterval(refreshAlerts, 10000);
+  show('home');
+}
+(async () => {
+  try { S.user = await api('/auth/me'); startApp(); } catch (e) { showAuth(); }
+})();
+</script>
+</body>
+</html>
