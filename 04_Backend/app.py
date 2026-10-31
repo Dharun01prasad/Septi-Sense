@@ -53,7 +53,12 @@ DEFAULT_CONFIG = {
     'sms_country_code': '+91',
     'sms_min_interval_min': 15,       # at most one SMS per patient per N minutes
     'sms_for_replays': False,         # also text the person who started a replay (clearly marked DEMO)
+    'sms_repeat_count': 3,            # also text when the same alert is raised this many times ...
+    'sms_repeat_window_min': 30,      # ... within this many minutes
 }
+# A wrist skin reading outside this range means the IR thermometer is not resting on skin (it sees air),
+# so it is treated as "no reading" instead of as a real temperature.
+SKIN_MIN_C, SKIN_MAX_C = 30.0, 40.5
 SECRET = ('sms_pass',)
 DEVICE_KINDS = ('device_offline', 'ecg_leads_off', 'no_finger', 'hr', 'spo2', 'temp', 'rr')
 
@@ -437,7 +442,7 @@ def live_hourly():
     df['hour'] = ((df.t_ms - t0) // H).astype(int)
     df['HR'] = np.where(df.sqi_ecg.fillna(0) >= 0.5, df.hr_ecg, np.where(df.sqi_ppg.fillna(0) >= 0.5, df.hr_ppg, np.nan))
     df['O2Sat'] = np.where(df.sqi_ppg.fillna(0) >= 0.5, df.spo2, np.nan)
-    df['Temp'] = np.where(df.sqi_temp.fillna(0) >= 0.5, df.skin_temp + CONFIG['temp_offset_c'], np.nan)
+    df['Temp'] = np.where(skin_ok(df), df.skin_temp + CONFIG['temp_offset_c'], np.nan)
     rr = pd.DataFrame(q('SELECT t_ms, rr, quality FROM resp WHERE patient=? AND t_ms >= ?', (DEVICE_KEY, t0)))
     out = []
     for h in range(int(df.hour.max()) + 1):
@@ -548,6 +553,11 @@ def risk_alerts(patient, t=None):
     return events
 
 
+def skin_ok(df):
+    """Seconds whose wrist temperature is usable: good sensor quality AND a plausible on-skin value."""
+    return (df.sqi_temp.fillna(0) >= 0.5) & df.skin_temp.between(SKIN_MIN_C, SKIN_MAX_C)
+
+
 def recent_vitals(seconds):
     """Medians of good-quality seconds over the last N seconds (what the alerts and the patient view use)."""
     win = q('SELECT * FROM telemetry WHERE t_ms >= ?', (now_ms() - seconds * 1000,))
@@ -557,9 +567,13 @@ def recent_vitals(seconds):
     hr = df.hr_ecg.where(df.sqi_ecg >= 0.5).median()
     if np.isnan(hr):
         hr = df.hr_ppg.where(df.sqi_ppg >= 0.5).median()
+    good_skin = df.skin_temp.where(skin_ok(df))
+    raw_skin = df.skin_temp.where(df.sqi_temp.fillna(0) >= 0.5)
     return dict(hr=_n(hr), spo2=_n(df.spo2.where(df.sqi_ppg >= 0.5).median()),
-                temp_core=_n((df.skin_temp.where(df.sqi_temp >= 0.5) + CONFIG['temp_offset_c']).median()),
-                skin=_n(df.skin_temp.where(df.sqi_temp >= 0.5).median()),
+                temp_core=_n((good_skin + CONFIG['temp_offset_c']).median()),
+                skin=_n(good_skin.median()),
+                skin_raw=_n(raw_skin.median()),
+                temp_off_skin=bool(good_skin.notna().sum() == 0 and raw_skin.notna().sum() > 0),
                 hrv=_n(df.rmssd.where(df.sqi_ecg >= 0.5).median()),
                 rr=DEVICE['rr'], rr_quality=DEVICE['rr_quality'],
                 leads_off=float(df.leads_off.mean()), no_finger=float((df.finger == 0).mean()), n=len(df))
@@ -592,12 +606,18 @@ def vital_and_device_alerts():
                                 sev('hr', hr), f'Heart rate {hr or 0:.0f} bpm outside {c["hr_low"]}-{c["hr_high"]}', hr))
         events.append(set_alert(key, 'spo2', spo2 is not None and (spo2 < c['spo2_low'] or explain.score('spo2', spo2) == 3),
                                 sev('spo2', spo2), f'SpO₂ {spo2 or 0:.0f}% below {c["spo2_low"]}%', spo2))
-        events.append(set_alert(key, 'temp', tc is not None and (tc > c['temp_high'] or tc < c['temp_low']), sev('temp', tc),
+        # temperature is a wrist-skin estimate: never alarm-level on its own (warn only)
+        events.append(set_alert(key, 'temp', tc is not None and (tc > c['temp_high'] or tc < c['temp_low']), 'warn',
                                 f'Estimated temperature {tc or 0:.1f} °C outside {c["temp_low"]}-{c["temp_high"]}', tc))
         rr = rv['rr'] if rv['rr_quality'] >= 0.3 else None
         events.append(set_alert(key, 'rr', rr is not None and (rr > c['rr_high'] or explain.score('rr', rr) == 3), sev('rr', rr),
                                 f'Breathing rate {rr or 0:.0f}/min above {c["rr_high"]}', rr))
     return [e for e in events if e]
+
+
+KIND_LABEL = {'sepsis_risk': 'Sepsis risk', 'device_offline': 'Sensor offline', 'ecg_leads_off': 'ECG sticker off',
+              'no_finger': 'No finger on the SpO2 sensor', 'hr': 'Heart rate', 'spo2': 'Blood oxygen',
+              'temp': 'Temperature', 'rr': 'Breathing rate'}
 
 
 async def emit_alerts(events):
@@ -606,10 +626,18 @@ async def emit_alerts(events):
         await broadcast(e, to=owner(a['patient']))
         if e['event'] in ('raised', 'escalated') and a['severity'] == 'alarm':
             asyncio.create_task(notify_alarm(a))
+        elif e['event'] == 'raised' and not a['patient'].startswith('replay:'):
+            # the same alert keeps coming back -> text the patient too, even if it is only a warning
+            since = now_ms() - float(CONFIG['sms_repeat_window_min']) * 60000
+            n = q('SELECT COUNT(*) n FROM alerts WHERE patient=? AND kind=? AND start_ms >= ?',
+                  (a['patient'], a['kind'], since), one=True)['n']
+            if n >= int(CONFIG['sms_repeat_count']):
+                asyncio.create_task(notify_alarm(a, repeated=n))
 
 
-async def notify_alarm(a):
-    """Text the patient's phone (number from sign-up) for alarm-level alerts. Logged in 'notifications'."""
+async def notify_alarm(a, repeated=None):
+    """Text the patient's phone (number from sign-up) for alarm-level alerts, or when the same alert keeps
+    repeating (sms_repeat_count times within sms_repeat_window_min). Logged in 'notifications'."""
     c = CONFIG
     if not c['sms_enabled'] or not c['sms_gateway_url']:
         return
@@ -624,13 +652,17 @@ async def notify_alarm(a):
     u = q('SELECT * FROM users WHERE id=?', (uid,), one=True) if uid else None
     if not u or not u['sms'] or not u['phone']:
         return
-    if now_ms() - LAST_SMS.get(uid, 0) < float(c['sms_min_interval_min']) * 60000:
+    gate = (uid, a['kind'])                     # rate limit per patient AND alert type
+    if now_ms() - LAST_SMS.get(gate, 0) < float(c['sms_min_interval_min']) * 60000:
         x('INSERT INTO notifications (alert_id, user_id, phone, sent_ms, ok, detail) VALUES (?,?,?,?,?,?)',
-          (a['id'], uid, u['phone'], now_ms(), 0, 'not sent: rate limit (one SMS per patient per '
+          (a['id'], uid, u['phone'], now_ms(), 0, 'not sent: rate limit (one SMS per alert type per '
                                                   f'{c["sms_min_interval_min"]} min)'))
         return
-    LAST_SMS[uid] = now_ms()
-    ok, detail = await asyncio.to_thread(notify.send_sms, c, u['phone'], notify.alarm_text(name or u['name'], a['message'], demo))
+    LAST_SMS[gate] = now_ms()
+    label = KIND_LABEL.get(a['kind'], a['kind'])
+    text = (notify.repeat_text(name or u['name'], label, repeated, c['sms_repeat_window_min'], a['message']) if repeated
+            else notify.alarm_text(name or u['name'], a['message'], demo))
+    ok, detail = await asyncio.to_thread(notify.send_sms, c, u['phone'], text)
     x('INSERT INTO notifications (alert_id, user_id, phone, sent_ms, ok, detail) VALUES (?,?,?,?,?,?)',
       (a['id'], uid, u['phone'], now_ms(), int(ok), detail))
     print(f'SMS to {u["phone"]}: {"sent" if ok else "FAILED"} ({detail})')
@@ -736,6 +768,9 @@ def api_me_now(req: Request):
             hints.append('The ECG stickers are not making contact. Press them firmly onto the skin.')
         if rv['no_finger'] > 0.5:
             hints.append('Place a finger gently on the clip sensor and keep it still.')
+        if rv.get('temp_off_skin'):
+            hints.append(f"The temperature sensor reads {rv['skin_raw']:.1f} °C, too cold for skin: "
+                         'make sure it rests flat against the inside of your wrist.')
     elif dev['device_id']:
         hints.append('The sensor box is not sending data. Check that it is switched on and on the same Wi-Fi.')
     else:
@@ -931,7 +966,8 @@ def api_series(pid: str, req: Request, minutes: int = 30):
     step = max(1, len(rows) // 600)
     rr = q('SELECT t_ms, rr, quality FROM resp WHERE patient=? AND t_ms >= ? AND t_ms <= ? ORDER BY t_ms', (DEVICE_KEY, since, end))
     for r in rows:
-        r['temp_core_est'] = r['skin_temp'] + CONFIG['temp_offset_c'] if r['skin_temp'] else None
+        r['temp_core_est'] = (r['skin_temp'] + CONFIG['temp_offset_c']
+                              if r['skin_temp'] and SKIN_MIN_C <= r['skin_temp'] <= SKIN_MAX_C else None)
     return {'vitals': rows[::step], 'resp': rr[::max(1, len(rr) // 300)], 'start_ms': since, 'end_ms': end}
 
 

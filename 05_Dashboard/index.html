@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SeptiSense</title>
+<script>document.documentElement.dataset.theme = 'light';   /* always opens light; the top-bar button switches to dark */</script>
 <!--
   SeptiSense dashboard - single file, vanilla JS, no external dependencies (works with no internet).
   Served by the backend at http://localhost:8000.  Data: WebSocket /ws (live) + REST /api/v1.
@@ -200,6 +201,39 @@ body:not(.tech) .tech-only { display: none !important; }
 .big { font-size: 34px; font-weight: 800; line-height: 1.1; }
 .drop { border: 2px dashed var(--line); border-radius: 14px; padding: 22px; text-align: center; background: #fafcfd; }
 .drop.over { border-color: var(--brand); background: var(--brand-soft); }
+
+/* ===================== dark theme (added on top; light rules above are unchanged) ===================== */
+:root[data-theme="dark"] {
+  --bg: #0f1418; --card: #171e24; --ink: #e6edf2; --muted: #9aa9b5; --faint: #6d7c88; --line: #26313a; --grid: #1f2930;
+  --brand: #2fb3bd; --brand-soft: #123438; --good: #4cc98a; --good-bg: #143024; --attn: #f0b24a; --attn-bg: #33270f;
+  --urgent: #ff6b6b; --urgent-bg: #3a1a1c; --unknown: #9aa6b0; --unknown-bg: #222c33; --risk: #e6edf2;
+  --hr2: #8fe0b0; --resp: #f2c94c; --temp2: #f6b48a;
+  --shadow: 0 1px 2px rgba(0,0,0,.35), 0 4px 16px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+[data-theme="dark"] #auth { background: radial-gradient(1200px 500px at 20% -10%, #123438, transparent), var(--bg); }
+[data-theme="dark"] header { background: rgba(23,30,36,.96); }
+[data-theme="dark"] .notice { color: #f0c27a; }
+[data-theme="dark"] .authcard, [data-theme="dark"] .vcard, [data-theme="dark"] .otile, [data-theme="dark"] .item,
+[data-theme="dark"] .tip, [data-theme="dark"] .drop { background: var(--card); }
+[data-theme="dark"] .drop.over { background: var(--brand-soft); }
+[data-theme="dark"] button { background-color: var(--card); color: var(--ink); }
+[data-theme="dark"] button.primary { background: var(--brand); color: #04171a; border-color: var(--brand); }
+[data-theme="dark"] button.ghost, [data-theme="dark"] nav button { background: transparent; color: var(--muted); }
+[data-theme="dark"] nav button.on { background: var(--brand-soft); color: var(--brand); }
+[data-theme="dark"] button.danger { color: var(--urgent); }
+[data-theme="dark"] input, [data-theme="dark"] select { background: #10171c; color: var(--ink); }
+[data-theme="dark"] .hero .ic { background: rgba(255,255,255,.08); }
+[data-theme="dark"] .switch .tr { background: #3a4650; }
+[data-theme="dark"] .chip.sim { background: #2d1b40; color: #d4b0ff; }
+[data-theme="dark"] .chip.demo { background: #12283d; color: #8cc8ff; }
+[data-theme="dark"] .strip i.low { background: #2f6b4a; } [data-theme="dark"] .strip i.raised { background: #8a6a22; }
+[data-theme="dark"] .strip i.high { background: #8c3a3a; }
+[data-theme="dark"] .legend b[style*="7fcf9f"] { background: #2f6b4a !important; }
+[data-theme="dark"] .legend b[style*="f1c060"] { background: #8a6a22 !important; }
+[data-theme="dark"] .legend b[style*="e2554b"] { background: #8c3a3a !important; }
+[data-theme="dark"] .meter i.a { background: #f0b24a; }
+[data-theme="dark"] code { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -212,6 +246,8 @@ body:not(.tech) .tech-only { display: none !important; }
   <symbol id="i-warn" viewBox="0 0 24 24"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9z"/><path d="M12 8v4M12 16h.01"/></symbol>
   <symbol id="i-wait" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
   <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
 </svg>
 
@@ -259,6 +295,7 @@ body:not(.tech) .tech-only { display: none !important; }
     <span class="chip idle" id="sensorChip">Sensor: not connected</span>
     <span class="chip sim hidden" id="simChip">SIMULATED DATA</span>
     <span class="chip demo hidden" id="demoChip">DEMO TIME</span>
+    <button class="ghost small" id="themeBtn" title="Switch between light and dark theme"></button>
     <label class="switch" title="Show waveforms, signal quality, device and model details"><input type="checkbox" id="techToggle"><span class="tr"></span>Technical details</label>
     <span class="small muted" id="userName"></span>
     <button class="ghost small" id="logoutBtn">Sign out</button>
@@ -983,6 +1020,13 @@ function setTech(on) {
   if (S.view === 'history' && S.histKey) openHistory(S.histKey);
 }
 $('#techToggle').onchange = e => setTech(e.target.checked);
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $('#themeBtn').innerHTML = t === 'dark' ? `${icon('i-sun')} Light` : `${icon('i-moon')} Dark`;
+  requestAnimationFrame(() => CHARTS.forEach(c => c.draw()));
+}
+$('#themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+applyTheme('light');
 function show(v) {
   S.view = v;
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));

@@ -28,6 +28,11 @@ def alarm_text(name, message, demo=False):
             'If you feel unwell contact a doctor; emergency 112.')
 
 
+def repeat_text(name, label, count, minutes, message):
+    return (f'SeptiSense alert for {name}: "{label}" has come back {count} times in the last {minutes} min. '
+            f'Latest: {message}. Research prototype, not a diagnosis. If you feel unwell contact a doctor; emergency 112.')
+
+
 def send_sms(cfg, phone, text, timeout=8):
     """Returns (ok, detail). Never raises."""
     url = (cfg.get('sms_gateway_url') or '').strip().rstrip('/')
