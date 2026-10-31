@@ -99,6 +99,61 @@ def now(rv, sensor=None):
     return dict(level=lv, headline=head, text=text, vitals=vs, hints=sensor.get('hints', []))
 
 
+VITAL = {'HR': ('heart rate', 'bpm'), 'O2Sat': ('blood oxygen', '%'), 'Temp': ('temperature', '°C'), 'Resp': ('breathing rate', '/min')}
+OTHER = {'Age': 'your age', 'Gender': 'your sex', 'news2_partial': 'your overall early-warning score (NEWS2)',
+         'qsofa_rr': 'a breathing rate of 22 or more', 'sirs_partial': 'the number of stress signs (fast heart, fever or low temperature, fast breathing)'}
+
+
+def _phrase(r):
+    """One model reason (feature, value) -> words a patient understands."""
+    f, v = r.get('feature', ''), r.get('value')
+    if f in OTHER:
+        return OTHER[f]
+    base, _, suffix = f.partition('_')
+    if base not in VITAL:
+        return r.get('label') or f
+    name, unit = VITAL[base]
+    num = (lambda x: f'{x:.1f}' if base == 'Temp' else f'{x:.0f}')
+    has = isinstance(v, (int, float)) and not math.isnan(v)
+    if suffix == '':
+        return f'your {name}' + (f' ({num(v)} {unit})' if has else '')
+    if suffix == 'mean6':
+        return f'your {name} over the last 6 hours' + (f' (about {num(v)} {unit})' if has else '')
+    if suffix == 'min6':
+        return f'your lowest {name} in the last 6 hours' + (f' ({num(v)} {unit})' if has else '')
+    if suffix == 'max6':
+        return f'your highest {name} in the last 6 hours' + (f' ({num(v)} {unit})' if has else '')
+    if suffix == 'std6':
+        return f'how much your {name} has been changing'
+    if suffix in ('d1', 'd6'):
+        span = 'hour' if suffix == 'd1' else '6 hours'
+        if has and v != 0:
+            return f'your {name} {"rising" if v > 0 else "falling"} over the last {span}'
+        return f'the change in your {name} over the last {span}'
+    if suffix == 'dev_base':
+        if has and v != 0:
+            return f'your {name} being {"higher" if v > 0 else "lower"} than your own normal'
+        return f'your {name} compared with your own normal'
+    return r.get('label') or f
+
+
+def why(reasons):
+    """Plain-language 'Why this outlook?' from the model's per-prediction reasons (6 h model, tree SHAP).
+    These are what the model weighed most - not medical causes."""
+    up = [_phrase(r) for r in (reasons or {}).get('raising', [])]
+    down = [_phrase(r) for r in (reasons or {}).get('lowering', [])]
+    if not up and not down:
+        return None
+    join = lambda xs: xs[0] if len(xs) == 1 else ', '.join(xs[:-1]) + ' and ' + xs[-1]
+    parts = []
+    if up:
+        parts.append(f'Mainly {join(up[:2])} {"is" if len(up[:2]) == 1 else "are"} pushing the estimate up.')
+    if down:
+        parts.append(f'{join(down[:2])[0].upper() + join(down[:2])[1:]} {"is" if len(down[:2]) == 1 else "are"} keeping it lower.')
+    return dict(text=' '.join(parts), raising=up, lowering=down,
+                note="These are the readings the model weighed most for this estimate, not a medical cause.")
+
+
 def outlook(horizons, warn_fraction):
     """horizons: {'6': {risk, lo, hi, threshold, prevalence?}, ...} for the latest model hour."""
     out = []

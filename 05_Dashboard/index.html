@@ -202,6 +202,13 @@ body:not(.tech) .tech-only { display: none !important; }
 .drop { border: 2px dashed var(--line); border-radius: 14px; padding: 22px; text-align: center; background: #fafcfd; }
 .drop.over { border-color: var(--brand); background: var(--brand-soft); }
 
+/* ---------- "Why?" explanation */
+.why { margin-top: 14px; border-radius: 12px; background: var(--brand-soft); padding: 12px 14px; font-size: 14px; }
+.why b { color: var(--brand); }
+.why ul { margin: 6px 0 0; padding-left: 0; list-style: none; font-size: 13px; }
+.why li { margin: 3px 0; } .why li::before { content: '▲ '; color: var(--urgent); } .why li.dn::before { content: '▼ '; color: var(--good); }
+.why .faint { font-size: 12px; margin-top: 6px; }
+
 /* ===================== dark theme (added on top; light rules above are unchanged) ===================== */
 :root[data-theme="dark"] {
   --bg: #0f1418; --card: #171e24; --ink: #e6edf2; --muted: #9aa9b5; --faint: #6d7c88; --line: #26313a; --grid: #1f2930;
@@ -270,6 +277,11 @@ body:not(.tech) .tech-only { display: none !important; }
         <label class="f" style="flex:1">Age<input name="age" type="number" min="1" max="120" required></label>
         <label class="f" style="flex:1">Sex<select name="gender"><option value="1">Male</option><option value="0">Female</option></select></label>
       </div>
+      <div class="row" style="flex-wrap:nowrap">
+        <label class="f" style="flex:1">Caregiver name <span class="hint">— optional</span><input name="caregiver_name" autocomplete="off"></label>
+        <label class="f" style="flex:1">Caregiver phone <span class="hint">— optional</span><input name="caregiver_phone" type="tel" autocomplete="off"></label>
+      </div>
+      <p class="hint" style="margin:-6px 0 0">A family member who gets a text if one of your alarms isn't acknowledged within 10 minutes.</p>
       <label class="f">Password <span class="hint">— at least 6 characters</span><input name="password" type="password" autocomplete="new-password" minlength="6" required></label>
       <div class="err" id="signupErr"></div>
       <button class="primary" type="submit">Create account</button>
@@ -315,7 +327,7 @@ body:not(.tech) .tech-only { display: none !important; }
   </div>
   <div class="row spread hidden" id="sessionBar">
     <span class="muted" id="sessionText"></span>
-    <button class="ghost" id="stopBtn">Stop monitoring</button>
+    <div class="row"><button id="shareLive">Share with my doctor</button><button class="ghost" id="stopBtn">Stop monitoring</button></div>
   </div>
 
   <div class="hero lv-unknown" id="hero">
@@ -331,6 +343,7 @@ body:not(.tech) .tech-only { display: none !important; }
   <div class="card">
     <div class="row spread"><h2>Outlook</h2><span class="small faint">estimated chance of developing sepsis — not a diagnosis</span></div>
     <div class="outlook" id="outlook"></div>
+    <div class="why hidden" id="whyBox"></div>
     <p class="small faint" id="outlookNote" style="margin-top:10px"></p>
   </div>
 
@@ -378,6 +391,14 @@ body:not(.tech) .tech-only { display: none !important; }
     <div class="card">
       <h2>Check a recording</h2>
       <p class="muted small">Upload vital signs that were recorded earlier and get the same 6 / 12 / 24 hour outlook as live monitoring.</p>
+      <div class="row" style="margin-top:10px;gap:16px">
+        <label class="chk"><input type="radio" name="upKind" value="vitals" checked> Hourly vitals (CSV / .psv)</label>
+        <label class="chk"><input type="radio" name="upKind" value="ecg"> Raw ECG waveform</label>
+      </div>
+      <div class="hidden" id="ecgOpts" style="margin-top:10px">
+        <label class="f">ECG sampling rate (samples per second)<input id="upFs" type="number" min="20" max="5000" value="250"></label>
+        <p class="hint">The SeptiSense node records ECG at 250 Hz. If your file came from another device, enter its rate — the heart rate is worked out from it.</p>
+      </div>
       <div class="drop" id="drop" style="margin-top:12px">
         <p style="margin:0"><b>Drop a CSV or .psv file here</b></p>
         <p class="small muted">or</p>
@@ -395,7 +416,10 @@ body:not(.tech) .tech-only { display: none !important; }
         <p class="small muted">One row per <b>hour</b>, oldest first. Columns (any subset, header names are flexible):
           <code>HR</code> (heart rate), <code>O2Sat</code> or <code>SpO2</code>, <code>Temp</code> (°C), <code>Resp</code> (breaths/min).
           Optional: <code>Age</code>, <code>Gender</code> (1 = male, 0 = female), <code>SepsisLabel</code> (to compare with the recorded outcome).
-          PhysioNet 2019 <code>.psv</code> files work as they are.</p></details>
+          PhysioNet 2019 <code>.psv</code> files work as they are.</p>
+        <p class="small muted"><b>Raw ECG:</b> the samples as numbers — one long row, or one per line (with several columns the last one is used).
+          At least 5 s; 30 s or more also gives a breathing rate. Heart rate (and breathing rate) are derived per hour of recording;
+          SpO₂ and temperature are not in an ECG, so the model treats them as unmeasured.</p></details>
       <h3 style="margin-top:14px">No file? Try a real recorded patient</h3>
       <p class="small muted">Held-out patients from hospital B of the PhysioNet 2019 dataset (never used for training):</p>
       <div id="sampleLinks" class="small"></div>
@@ -422,7 +446,13 @@ body:not(.tech) .tech-only { display: none !important; }
         <label class="f">Sex<select id="pSex"><option value="1">Male</option><option value="0">Female</option></select></label>
       </div>
       <label class="chk" style="margin-top:12px"><input type="checkbox" id="pSms"> Text me when an alarm-level alert is raised</label>
-      <div class="row" style="margin-top:12px"><button class="primary" id="pSave">Save profile</button><span class="status" id="pStatus"></span></div>
+      <h3 style="margin-top:16px">Caregiver</h3>
+      <p class="small muted" style="margin-top:2px">If an alarm is not acknowledged within <span id="escMin">10</span> minutes, this person gets a text too.</p>
+      <div class="form" style="margin-top:8px">
+        <label class="f">Caregiver name<input id="pCgName" placeholder="optional"></label>
+        <label class="f">Caregiver phone<input id="pCgPhone" type="tel" placeholder="optional"></label>
+      </div>
+      <div class="row" style="margin-top:12px"><button class="primary" id="pSave">Save profile</button><button id="cgTest">Send test SMS to caregiver</button><span class="status" id="pStatus"></span></div>
       <p class="small faint" style="margin-top:10px">Age and sex are model inputs. Changes apply to new predictions.</p>
     </div>
     <div class="card">
@@ -624,7 +654,7 @@ class Chart {
         if (prev === null || (d.gap && p[0] - prev > d.gap)) ctx.moveTo(X(p[0]), Y(p[1])); else ctx.lineTo(X(p[0]), Y(p[1]));
         prev = p[0];
       }
-      ctx.stroke(); ctx.setLineDash([]);
+      if (!s.noLine) ctx.stroke(); ctx.setLineDash([]);
       if (s.dots) { ctx.fillStyle = s.color; for (const p of s.points) if (isNum(p[1])) { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 3, 0, 7); ctx.fill(); } }
     }
     ctx.restore();
@@ -687,11 +717,41 @@ function strips(d) {
   return `<div class="strips">${hs.map(row).join('')}${marks}<div></div><div class="axis"><span>hour 0</span><span>hour ${Math.round(total / 2)}</span><span>hour ${total - 1}</span></div></div>
     <div class="legend"><span><b style="background:#7fcf9f"></b>Low</span><span><b style="background:#f1c060"></b>Raised</span><span><b style="background:#e2554b"></b>High (alarm level)</span><span><b style="background:var(--grid)"></b>no data</span></div>`;
 }
+// "Why this outlook?" - plain-language reasons from the backend (explain.why)
+function whyHtml(w) {
+  if (!w) return '';
+  return `<div class="why"><b>Why this outlook?</b> ${esc(w.text)}
+    <ul class="tech-only">${(w.raising || []).map(x => `<li>${esc(x)}</li>`).join('')}${(w.lowering || []).map(x => `<li class="dn">${esc(x)}</li>`).join('')}</ul>
+    <div class="faint">${esc(w.note)} Based on the 6-hour model.</div></div>`;
+}
+
+// raw-ECG uploads: the waveform with detected beats, and the risk trace across the recording
+function ecgCharts(el, ex, thr) {
+  const v = ex.ecg.v || [], dt0 = ex.ecg.dt || 0.004, dur = v.length * dt0;
+  const ecg = new Chart($('.ecgchart', el), { h: 170, xFmt: (x, t) => t ? x.toFixed(2) + ' s' : x + ' s', yFmt: (y, t) => t ? y.toFixed(0) : y });
+  const pts = v.map((y, i) => [i * dt0, y]);
+  const beatY = t => v[Math.min(v.length - 1, Math.round(t / dt0))];
+  ecg.set({ x: [0, dur], y: autoRange(v, 1), snap: dt0 * 3,
+    series: [{ label: 'ECG', color: css('--ecg'), width: 1.3, points: pts },
+      { label: 'heartbeat', color: css('--urgent'), noLine: true, dots: true, points: (ex.ecg.beats || []).map(t => [t, beatY(t)]) }] });
+  const tr = ex.trace || [];
+  const risk = new Chart($('.tracechart', el), { h: 170, xFmt: (x, t) => t ? x.toFixed(1) + ' s' : x + ' s', yFmt: (y, t) => t ? y.toFixed(2) + ' %' : y + '%' });
+  if (!tr.length) { risk.set({ series: [], empty: 'not enough heartbeats for a risk trace' }); return [ecg, risk]; }
+  const hi = Math.max(...tr.map(p => p.hi ?? p.risk), thr * 1.3) * 100;
+  risk.set({ x: [0, dur], y: [0, Math.min(100, hi * 1.15)], snap: Math.max(0.5, dur / 60),
+    series: [{ label: '6 h risk', color: css('--risk'), dots: tr.length < 40, points: tr.map(p => [p.t, p.risk * 100]) }],
+    band: { color: 'rgba(19,33,44,.10)', points: tr.filter(p => isNum(p.lo)).map(p => [p.t, p.lo * 100, p.hi * 100]) },
+    hlines: [{ y: thr * 100, color: css('--urgent'), label: 'alarm ' + pct(thr) }],
+    tipExtra: x => { const p = tr.find(q => Math.abs(q.t - x) < 1e-6); return p ? `<div class="faint">heart rate ${fmt(p.hr)} bpm${p.horizons ? ` · 12 h ${pct(p.horizons['12'])} · 24 h ${pct(p.horizons['24'])}` : ''}</div>` : ''; } });
+  return [ecg, risk];
+}
+
 // detail view for a session / upload / replay (history, upload result, replay)
 const DETAIL_CHARTS = new Map();
 function renderDetail(el, d, key, title) {
   const info = d.patient || {}, P = d.predictions || [], H = d.hourly || [], last = H[H.length - 1] || {};
   const isSess = key.startsWith('sess:'), isRep = key.startsWith('replay:');
+  const ex = info.extra && info.extra.ecg ? info.extra : null;          // raw-ECG upload: waveform + risk trace
   const sub = isSess ? `Monitoring from ${dt(info.start_ms)}${info.end_ms ? ' to ' + hm(info.end_ms) : ' (running)'}`
     : isRep ? `Recorded ICU patient, ${info.total_hours ?? '?'} hours · age ${fmt(info.age)} · ${info.gender === 1 ? 'male' : 'female'}`
       : `Uploaded ${dt(info.created_ms)} · ${info.n_hours} hourly rows · age ${fmt(info.age)} · ${info.gender === 1 ? 'male' : 'female'}`;
@@ -699,17 +759,25 @@ function renderDetail(el, d, key, title) {
   if (isNum(info.onset_hour)) outcome = `<p class="small"><b>Recorded outcome:</b> sepsis onset at hour ${info.onset_hour} (dataset label).</p>`;
   else if (isRep || info.label_start_hour === null && 'label_start_hour' in info && !isSess) outcome = isRep ? '<p class="small"><b>Recorded outcome:</b> no sepsis during the stay.</p>' : '';
   el.innerHTML = `<div class="row spread"><div><h2>${esc(title || info.name || 'Details')}</h2><p class="small muted">${esc(sub)}</p></div>
-      <a class="small" href="/api/v1/export/${encodeURIComponent(key)}.csv">Download CSV</a></div>
+      <div class="row"><button class="small" data-report="${esc(key)}">Share with my doctor</button>
+      <a class="small" href="/api/v1/export/${encodeURIComponent(key)}.csv">Download CSV</a></div></div>
     ${outcome}
+    ${ex && ex.summary ? ecgSummaryHtml(ex.summary) : ''}
     <h3 style="margin-top:10px">Latest outlook${P.length ? ` (hour ${P[P.length - 1].hour})` : ''}</h3>
     <div class="outlook">${outlookTiles(d.outlook, 'No outlook yet.')}</div>
+    ${whyHtml(d.why)}
     <h3 style="margin-top:16px">Outlook hour by hour</h3>${strips(d)}
+    ${ex ? `<h3 style="margin-top:18px">ECG recording</h3><div class="ecgchart"></div>
+      <p class="small faint">${(ex.ecg.beats || []).length} heartbeats detected (dots) · ${fmt(ex.summary && ex.summary.duration_s, 1)} s at ${ex.summary ? ex.summary.fs : '?'} Hz</p>
+      <h3 style="margin-top:14px">Sepsis risk across the recording (6-hour outlook)</h3><div class="tracechart"></div>
+      <p class="small faint">Re-estimated every few seconds from the heart rate of the previous ${fmt(ex.trace_window_s, 0)} s, as if that rate held for a whole hour.
+        It shows how the estimate moves with the heart rate during the recording; it is not a second-by-second prediction.</p>` : ''}
     <div class="tech-only"><h3 style="margin-top:16px">6 h risk (%)</h3><div class="dchart"></div>
       <h3 style="margin-top:12px">Last hour's vitals</h3>
       <p class="small mono">HR ${fmt(last.HR)} · SpO₂ ${fmt(last.O2Sat)} · Temp ${fmt(last.Temp, 1)} · Resp ${fmt(last.Resp)}${isNum(last.SBP) ? ' · SBP ' + fmt(last.SBP) + ' (not used by the model)' : ''}${last.label != null ? ' · dataset label ' + last.label : ''}</p></div>`;
   const ch = new Chart($('.dchart', el), { h: 180, xFmt: (v, t) => t ? 'hour ' + v : String(v), yFmt: (v, t) => t ? v.toFixed(1) + ' %' : v + '%' });
-  if (DETAIL_CHARTS.has(el)) { const i = CHARTS.indexOf(DETAIL_CHARTS.get(el)); if (i >= 0) CHARTS.splice(i, 1); }
-  DETAIL_CHARTS.set(el, ch);
+  for (const c of DETAIL_CHARTS.get(el) || []) { const i = CHARTS.indexOf(c); if (i >= 0) CHARTS.splice(i, 1); }
+  DETAIL_CHARTS.set(el, [ch, ...(ex ? ecgCharts(el, ex, d.threshold) : [])]);
   if (!P.length) { ch.set({ series: [], empty: 'no predictions yet' }); return; }
   const thr = d.threshold, maxH = Math.max(6, P[P.length - 1].hour, (info.total_hours || 0) - 1);
   const hi = Math.max(...P.map(p => isNum(p.risk_hi) ? p.risk_hi : p.risk), thr * 1.5) * 100;
@@ -763,6 +831,9 @@ function renderHome() {
   if (!n.model_loaded) ol.innerHTML = '<p class="muted" style="grid-column:1/-1">The prediction model is not installed yet (run 02_ML/train.py).</p>';
   else if (!n.monitoring) ol.innerHTML = '<p class="muted" style="grid-column:1/-1">Start monitoring to get your outlook.</p>';
   else ol.innerHTML = outlookTiles(n.outlook, 'Collecting readings — your first outlook appears within about a minute.');
+  const wb = $('#whyBox'), w = n.monitoring && n.why;
+  wb.classList.toggle('hidden', !w);
+  if (w) wb.outerHTML = whyHtml(w).replace('class="why"', 'class="why" id="whyBox"');
   const q = n.prediction && n.prediction.quality;
   $('#outlookNote').textContent = (q && q.level !== 'good' ? `Based on incomplete readings (missing: ${q.missing.map(m => VNAME[m] || m).join(', ')}). ` : '') +
     'A research model trained on hospital ICU records estimates these chances. "High" means its alarm level was reached — most such alarms in testing were false.';
@@ -891,25 +962,119 @@ const drop = $('#drop');
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); takeFile(e.dataTransfer.files[0]); });
+const upKind = () => ($$('input[name="upKind"]').find(r => r.checked) || {}).value || 'vitals';
+$$('input[name="upKind"]').forEach(r => r.onchange = () => { $('#ecgOpts').classList.toggle('hidden', upKind() !== 'ecg'); $('#upErr').textContent = ''; });
+function ecgSummaryHtml(s) {
+  return `<div class="why" style="margin:0 0 14px"><b>Derived from your ECG</b> — ${fmt(s.duration_s, 1)} s at ${s.fs} Hz (${s.samples} samples), ${s.beats} heartbeats found.
+    <div style="margin-top:6px">Heart rate <b>${fmt(s.hr)} bpm</b> · breathing rate <b>${isNum(s.rr) ? fmt(s.rr) + ' /min' : 'not available'}</b>${isNum(s.rmssd) ? ` · HRV (RMSSD) ${fmt(s.rmssd)} ms` : ''} · rhythm quality ${pct(s.quality, 0)}</div>
+    ${(s.warnings || []).map(w => `<div class="small" style="margin-top:4px;color:var(--attn)">⚠ ${esc(w)}</div>`).join('')}</div>`;
+}
 $('#upBtn').onclick = async () => {
   if (!upText) return;
   $('#upBtn').disabled = true; $('#upBtn').textContent = 'Analysing…'; $('#upErr').textContent = '';
   try {
-    const age = parseFloat($('#upAge').value);
-    const r = await post('/uploads', { name: upName, content: upText, age: isNum(age) ? age : null, gender: +$('#upSex').value });
+    const age = parseFloat($('#upAge').value), ecg = upKind() === 'ecg';
+    const body = { name: upName, content: upText, age: isNum(age) ? age : null, gender: +$('#upSex').value };
+    if (ecg) body.fs = parseFloat($('#upFs').value) || 250;
+    const r = await post(ecg ? '/uploads/ecg' : '/uploads', body);
     S.upKey = r.key; S.histKey = r.key;
     const d = await api(`/patients/${encodeURIComponent(r.key)}/hourly`);
-    renderDetail($('#upDetail'), d, r.key, upName);
+    renderDetail($('#upDetail'), d, r.key, ecg ? `${upName} (raw ECG)` : upName);
   } catch (e) { $('#upErr').textContent = e.message; }
   $('#upBtn').disabled = false; $('#upBtn').textContent = 'Analyse recording';
 };
+
+// =================================================================== "Share with my doctor" report (printable one page)
+async function openReport(key) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('Please allow pop-ups for this page to open the report.'); return; }
+  w.document.write('<p style="font-family:Segoe UI,sans-serif;padding:24px">Preparing your report…</p>');
+  try {
+    const [d, alerts, model] = await Promise.all([api(`/patients/${encodeURIComponent(key)}/hourly`), api('/alerts?limit=500'), api('/model').catch(() => null)]);
+    w.document.open(); w.document.write(reportHtml(d, key, alerts.filter(a => a.patient === key), model)); w.document.close();
+  } catch (e) { w.document.body.innerHTML = `<p style="font-family:sans-serif;padding:24px">Could not build the report: ${esc(e.message)}</p>`; }
+}
+function reportHtml(d, key, alerts, model) {
+  const u = S.user || {}, info = d.patient || {}, H = d.hourly || [], P = d.predictions || [];
+  const isSess = key.startsWith('sess:');
+  const name = isSess || key.startsWith('up:') ? u.name : (info.name || 'Example patient');
+  const age = isSess ? u.age : info.age, sex = (isSess ? u.gender : info.gender) === 1 ? 'male' : 'female';
+  const period = isSess ? `Wearable monitoring, ${dt(info.start_ms)} – ${info.end_ms ? dt(info.end_ms) : 'now (still running)'}`
+    : `Uploaded recording "${info.name || ''}", ${info.n_hours ?? info.total_hours ?? H.length} hourly rows`;
+  const VIT = [['HR', 'Heart rate', 'bpm', 0, '#15a34a'], ['O2Sat', 'Blood oxygen (SpO₂)', '%', 0, '#0891b2'],
+    ['Temp', 'Temperature (estimate)', '°C', 1, '#e2570b'], ['Resp', 'Breathing rate (derived)', '/min', 0, '#c08a00']];
+  const stats = k => { const xs = H.map(r => r[k]).filter(isNum); if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b);
+    return { n: xs.length, min: s[0], max: s[s.length - 1], med: s[Math.floor(s.length / 2)], last: xs[xs.length - 1] }; };
+  const spark = (k, col) => {
+    const pts = H.map((r, i) => [i, r[k]]).filter(p => isNum(p[1])); if (pts.length < 2) return '';
+    const ys = pts.map(p => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), W = 170, Hh = 34, n = Math.max(1, H.length - 1);
+    const path = pts.map((p, j) => `${j ? 'L' : 'M'}${(p[0] / n * W).toFixed(1)},${(Hh - 2 - (hi === lo ? 0.5 : (p[1] - lo) / (hi - lo)) * (Hh - 4)).toFixed(1)}`).join(' ');
+    return `<svg width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}"><path d="${path}" fill="none" stroke="${col}" stroke-width="1.6"/></svg>`;
+  };
+  const vitRows = VIT.map(([k, lab, unit, dd, col]) => { const s = stats(k);
+    return `<tr><td>${lab}</td>${s ? `<td>${s.med.toFixed(dd)} ${unit}</td><td>${s.min.toFixed(dd)} – ${s.max.toFixed(dd)}</td><td>${s.last.toFixed(dd)}</td><td>${s.n}</td>` : '<td colspan="4" class="mut">no reliable data</td>'}<td>${spark(k, col)}</td></tr>`; }).join('');
+  const th = d.thresholds || {}, by = {}; P.forEach(p => by[p.hour] = p);
+  const hs = P.length ? Object.keys(P[P.length - 1].horizons || { 6: 1 }).sort((a, b) => a - b) : [];
+  const total = P.length ? Math.max(P[P.length - 1].hour + 1, info.total_hours || 0) : 0;
+  const COL = { low: '#7fcf9f', raised: '#f1c060', high: '#e2554b', none: '#eef1f4' };
+  const lvAt = (i, h) => { const p = by[i]; if (!p) return 'none'; const v = p.horizons ? p.horizons[h] : (h === '6' ? { risk: p.risk } : null); return v ? levelOf(v.risk, th[h] ?? d.threshold) : 'none'; };
+  const strip = hs.map(h => `<tr><td style="white-space:nowrap">within ${h} h</td><td style="width:100%"><div class="strip">${Array.from({ length: total }, (_, i) => `<i style="background:${COL[lvAt(i, h)]}"></i>`).join('')}</div></td></tr>`).join('');
+  const outl = (d.outlook || []).map(o => `<tr><td>Next ${o.hours} hours</td><td><b style="color:${{ low: '#19804a', raised: '#a35f00', high: '#c0261f' }[o.level]}">${LVWORD[o.level]}</b></td><td>${pct(o.risk)}</td><td>${pct(o.threshold)}</td></tr>`).join('');
+  const qn = { good: 0, partial: 0, poor: 0 }; P.forEach(p => { const l = p.quality && p.quality.level; if (l in qn) qn[l]++; });
+  const alertRows = alerts.length ? alerts.map(a => `<tr><td>${dt(a.start_ms)}</td><td>${a.severity === 'alarm' ? '<b style="color:#c0261f">ALARM</b>' : 'Warning'}</td><td>${esc(KIND[a.kind] || a.kind)}</td><td>${esc(a.message)}</td><td>${a.end_ms ? hm(a.end_ms) : 'active'}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="mut">No alerts in this period.</td></tr>';
+  const ev = model && model.evaluation, h6 = ev && ((ev.horizons && ev.horizons['6']) || (ev.models && ev.models.wearable));
+  const perf = h6 ? `Tested on ${ev.split.test_patients} patients from a hospital not used for training: AUROC ${h6.auroc.toFixed(2)} for the 6-hour outlook (0.5 = chance, 1.0 = perfect).
+    At its alarm level about 1 in ${Math.round(1 / h6.ppv)} alarm hours was a real sepsis hour${h6.alarms && isNum(h6.alarms.chance_detection_rate) ? `; it warned ${pct(h6.alarms.detection_rate, 0)} of septic patients within 6 h of onset (random alarms: ${pct(h6.alarms.chance_detection_rate, 0)})` : ''}.` : '';
+  const w = d.why;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>SeptiSense report – ${esc(name)}</title><style>
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+    body { font: 13px/1.45 "Segoe UI", system-ui, sans-serif; color: #13212c; max-width: 820px; margin: 24px auto; padding: 0 20px; }
+    h1 { font-size: 21px; margin: 0; } h2 { font-size: 14px; margin: 18px 0 6px; color: #0d7a84; text-transform: uppercase; letter-spacing: .04em; }
+    table { width: 100%; border-collapse: collapse; } td, th { text-align: left; padding: 5px 8px; border-bottom: 1px solid #e2e8ee; vertical-align: middle; }
+    th { font-size: 11.5px; color: #5b6b78; } .mut { color: #8a98a4; }
+    .disc { background: #fff3dc; color: #6f4300; border-radius: 8px; padding: 8px 12px; margin: 12px 0; font-size: 12.5px; }
+    .why { background: #e3f3f4; border-radius: 8px; padding: 8px 12px; }
+    .strip { display: flex; gap: 1px; height: 14px; } .strip i { flex: 1; display: block; border-radius: 1px; }
+    .legend span { display: inline-block; margin-right: 12px; font-size: 11.5px; } .legend b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 2px solid #0d7a84; padding-bottom: 10px; }
+    .btn { background: #0d7a84; color: #fff; border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+    @media print { .noprint { display: none; } body { margin: 0 auto; } }
+  </style></head><body>
+  <div class="noprint" style="text-align:right;margin-bottom:10px"><button class="btn" onclick="window.print()">Print / Save as PDF</button></div>
+  <div class="head"><div><h1>SeptiSense summary for your doctor</h1><div>${esc(name)} · ${fmt(age)} years · ${sex}</div><div class="mut">${esc(period)}</div></div>
+    <div class="mut" style="text-align:right">Generated ${dt(Date.now())}</div></div>
+  <div class="disc"><b>Research prototype — not a medical device and not clinically validated.</b> These are measurements from a student-built wearable and estimates from a research model. They are not a diagnosis; please interpret them clinically.</div>
+  <h2>Early-warning outlook (latest)</h2>
+  ${outl ? `<table><tr><th>Window</th><th>Level</th><th>Estimated chance of sepsis</th><th>Alarm level</th></tr>${outl}</table>` : '<p class="mut">No outlook available.</p>'}
+  ${w ? `<p class="why"><b>Main factors:</b> ${esc(w.text)} <span class="mut">(${esc(w.note)})</span></p>` : ''}
+  <h2>Vital signs over this period (hourly values)</h2>
+  <table><tr><th>Measure</th><th>Median</th><th>Range</th><th>Latest</th><th>Hours</th><th>Trend</th></tr>${vitRows}</table>
+  <p class="mut">Temperature = wrist skin temperature + a calibration offset (estimate, not core). Breathing rate is derived from the ECG and pulse signals. SpO₂ is not calibrated against a medical oximeter.</p>
+  ${total ? `<h2>Outlook hour by hour</h2><table>${strip}</table>
+  <div class="legend"><span><b style="background:#7fcf9f"></b>Low</span><span><b style="background:#f1c060"></b>Raised</span><span><b style="background:#e2554b"></b>High (alarm level)</span><span><b style="background:#eef1f4"></b>no data</span></div>
+  <p class="mut">${total} model hours${isSess && d.seconds_per_model_hour !== 3600 ? ` (DEMO TIME: 1 model hour = ${d.seconds_per_model_hour} s)` : ''}. Input quality: ${qn.good} good, ${qn.partial} partial, ${qn.poor} poor hours.${isNum(info.onset_hour) ? ` Recorded sepsis onset in the data: hour ${info.onset_hour}.` : ''}</p>` : ''}
+  <h2>Alerts in this period</h2>
+  <table><tr><th>Started</th><th>Level</th><th>Alert</th><th>Details</th><th>Ended</th></tr>${alertRows}</table>
+  <h2>About the estimate</h2>
+  <p>LightGBM models trained on ICU records from one hospital system (PhysioNet/CinC Challenge 2019) using heart rate, SpO₂, temperature, breathing rate, age and sex. ${perf}
+    Limitations: the model learned from ICU charting, not from a wearable; blood pressure, laboratory tests and consciousness are not measured.</p>
+  <p class="mut" style="margin-top:18px">SeptiSense — educational research prototype. In an emergency call 112.</p>
+  </body></html>`;
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-report]'); if (b) openReport(b.dataset.report); });
+$('#shareLive').onclick = () => { const s = S.now && S.now.session; if (s) openReport(s.key); };
 
 // =================================================================== ALERTS
 async function refreshAlerts() {
   try { S.alerts = await api('/alerts?limit=200'); } catch (e) { return; }
   const act = S.alerts.filter(a => a.end_ms == null).sort((a, b) => (b.severity === 'alarm') - (a.severity === 'alarm') || b.start_ms - a.start_ms);
   const who = p => p === 'device' ? 'Sensor' : p.startsWith('replay:') ? 'Replay ' + p.slice(7) : p.startsWith('sess:') ? 'You (live)' : 'Recording';
-  const sms = a => !a.sms ? '' : a.sms.ok ? '<span style="color:var(--good)">SMS sent ✓</span>' : `<span class="faint" title="${esc(a.sms.detail)}">SMS not sent</span>`;
+  const care = a => a.caregiver_sms
+    ? (a.caregiver_sms.ok ? ' · <span style="color:var(--good)">caregiver texted ✓</span>' : ` · <span class="faint" title="${esc(a.caregiver_sms.detail)}">caregiver SMS failed</span>`)
+    : (a.severity === 'alarm' && !a.acked && a.end_ms == null && String(a.patient).startsWith('sess:') && S.user && S.user.caregiver_phone && S.config && S.config.sms_enabled
+      ? ` · <span style="color:var(--attn)">caregiver will be texted at ${hm(a.start_ms + (S.config.caregiver_escalate_min ?? 10) * 60000)} unless acknowledged</span>` : '');
+  const sms = a => (!a.sms ? '' : a.sms.ok ? '<span style="color:var(--good)">SMS sent ✓</span>' : `<span class="faint" title="${esc(a.sms.detail)}">SMS not sent</span>`) + care(a);
   $('#alertBadge').innerHTML = act.length ? `<span class="chip ${act.some(a => a.severity === 'alarm') ? 'bad' : 'idle'}" style="padding:0 7px">${act.length}</span>` : '';
   $('#alertCount').textContent = act.length ? `${act.length} active` : '';
   $('#activeAlerts').innerHTML = act.length ? act.map(a => `<div class="alert ${a.severity}"><span class="sev ${a.severity}">${a.severity === 'alarm' ? 'ALARM' : 'WARNING'}</span>
@@ -941,6 +1106,8 @@ const FIELDS = [
   ['rr_high', 'Breathing rate high (/min)', 'num'], ['vital_alert_seconds', 'Vital window (s)', 'int', 'median over this window'],
   ['device_offline_seconds', 'Sensor offline after (s)', 'int'], ['seconds_per_model_hour', 'Seconds per model hour', 'int', '3600 = real time'],
   ['replay_seconds_per_hour', 'Replay default (s / hour)', 'num'], ['temp_offset_c', 'Skin → core offset (°C)', 'num', 'set by calibration'],
+  ['caregiver_escalate_min', 'Text caregiver after unacknowledged alarm (min)', 'num', 'e.g. 1 for a live demo'],
+  ['sms_repeat_count', 'SMS when the same alert repeats (times)', 'int'], ['sms_repeat_window_min', '…within (minutes)', 'int'],
 ];
 function renderConfig() {
   const c = S.config; if (!c) return;
@@ -954,6 +1121,7 @@ function renderConfig() {
   const s = c.seconds_per_model_hour, demo = isNum(+s) && +s !== 3600;
   $('#demoChip').classList.toggle('hidden', !demo); $('#demoChip').textContent = demo ? `DEMO TIME · 1 h = ${s} s` : 'DEMO TIME';
   $('#sphNow').textContent = `now: ${s} s per model hour`;
+  $('#escMin').textContent = c.caregiver_escalate_min ?? 10;
 }
 async function loadConfig() { try { S.config = await api('/config'); renderConfig(); } catch (e) {} }
 function ok(el, msg) { el.textContent = msg; el.style.color = css('--good'); }
@@ -985,10 +1153,16 @@ function renderProfile() {
   const u = S.user; if (!u) return;
   $('#userName').textContent = u.name; $('#pName').value = u.name; $('#pPhone').value = u.phone; $('#pAge').value = u.age;
   $('#pSex').value = String(u.gender); $('#pSms').checked = !!u.sms; $('#upAge').value = u.age; $('#upSex').value = String(u.gender);
+  $('#pCgName').value = u.caregiver_name || ''; $('#pCgPhone').value = u.caregiver_phone || '';
 }
 $('#pSave').onclick = async () => {
-  try { S.user = await api('/auth/me', { method: 'PUT', body: JSON.stringify({ name: $('#pName').value, phone: $('#pPhone').value, age: +$('#pAge').value, gender: +$('#pSex').value, sms: $('#pSms').checked }) });
+  try { S.user = await api('/auth/me', { method: 'PUT', body: JSON.stringify({ name: $('#pName').value, phone: $('#pPhone').value, age: +$('#pAge').value, gender: +$('#pSex').value, sms: $('#pSms').checked,
+      caregiver_name: $('#pCgName').value, caregiver_phone: $('#pCgPhone').value }) });
     renderProfile(); ok($('#pStatus'), 'saved ✓'); } catch (e) { bad($('#pStatus'), e.message); }
+};
+$('#cgTest').onclick = async () => {
+  const el = $('#pStatus'); el.textContent = 'sending…'; el.style.color = '';
+  try { const r = await post('/sms/test?to=caregiver'); r.ok ? ok(el, `test SMS sent to the caregiver (${r.phone}) ✓`) : bad(el, `not sent: ${r.detail}`); } catch (e) { bad(el, e.message); }
 };
 
 // =================================================================== websocket

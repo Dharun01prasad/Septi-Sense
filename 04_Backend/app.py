@@ -13,7 +13,7 @@ dataset patients run through the same model.  Keys: 'sess:<id>' (monitoring sess
 Start:  python app.py          (then open http://localhost:8000)
 Educational / research prototype - NOT a medical device.
 """
-import asyncio, collections, csv, hashlib, hmac, io, json, os, secrets, socket, sqlite3, threading, time
+import asyncio, collections, csv, hashlib, hmac, io, json, os, re, secrets, socket, sqlite3, threading, time
 from typing import Optional
 
 import numpy as np
@@ -55,6 +55,7 @@ DEFAULT_CONFIG = {
     'sms_for_replays': False,         # also text the person who started a replay (clearly marked DEMO)
     'sms_repeat_count': 3,            # also text when the same alert is raised this many times ...
     'sms_repeat_window_min': 30,      # ... within this many minutes
+    'caregiver_escalate_min': 10,     # unacknowledged alarm for this long -> text the caregiver
 }
 # A wrist skin reading outside this range means the IR thermometer is not resting on skin (it sees air),
 # so it is treated as "no reading" instead of as a real temperature.
@@ -96,6 +97,10 @@ CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, 
 ''')
 if 'horizons' not in [r[1] for r in db.execute('PRAGMA table_info(predictions)')]:   # older database
     db.execute('ALTER TABLE predictions ADD COLUMN horizons TEXT')
+for _t, _c in (('users', 'caregiver_name TEXT'), ('users', 'caregiver_phone TEXT'), ('alerts', 'escalated_ms INTEGER'),
+               ('uploads', 'extra TEXT')):
+    if _c.split()[0] not in [r[1] for r in db.execute(f'PRAGMA table_info({_t})')]:
+        db.execute(f'ALTER TABLE {_t} ADD COLUMN {_c}')
 db.commit()
 
 
@@ -172,7 +177,8 @@ def _hash(pw, salt):
 
 
 def public_user(u):
-    return {k: u[k] for k in ('id', 'name', 'phone', 'age', 'gender', 'sms', 'created_ms')} if u else None
+    return {k: u.get(k) for k in ('id', 'name', 'phone', 'age', 'gender', 'sms', 'created_ms',
+                                  'caregiver_name', 'caregiver_phone')} if u else None
 
 
 def user_from_token(tok):
@@ -224,6 +230,15 @@ def _profile_fields(b, partial=False):
         out['gender'] = 1 if int(b.get('gender', 1)) == 1 else 0
     if 'sms' in b:
         out['sms'] = 1 if b['sms'] else 0
+    # optional caregiver (family member) who is texted if an alarm is not acknowledged in time
+    if 'caregiver_name' in b:
+        out['caregiver_name'] = str(b.get('caregiver_name') or '').strip()[:80] or None
+    if 'caregiver_phone' in b:
+        cp = str(b.get('caregiver_phone') or '').strip()
+        cp = notify.normalize_phone(cp, CONFIG['sms_country_code']) if cp else None
+        if cp and len(cp) < 9:
+            raise HTTPException(400, "please enter a valid caregiver phone number (or leave it empty)")
+        out['caregiver_phone'] = cp
     return out
 
 
@@ -237,8 +252,10 @@ async def api_signup(req: Request, response: Response):
     if q('SELECT id FROM users WHERE phone=?', (f['phone'],), one=True):
         raise HTTPException(409, 'an account with this phone number already exists - please sign in')
     salt = secrets.token_hex(16)
-    uid = x('INSERT INTO users (name, phone, pw_salt, pw_hash, age, gender, sms, created_ms) VALUES (?,?,?,?,?,?,?,?)',
-            (f['name'], f['phone'], salt, _hash(pw, salt), f['age'], f['gender'], 1, now_ms()))
+    uid = x('INSERT INTO users (name, phone, pw_salt, pw_hash, age, gender, sms, created_ms, caregiver_name, caregiver_phone) '
+            'VALUES (?,?,?,?,?,?,?,?,?,?)',
+            (f['name'], f['phone'], salt, _hash(pw, salt), f['age'], f['gender'], 1, now_ms(),
+             f.get('caregiver_name'), f.get('caregiver_phone')))
     _new_session(response, uid)
     return public_user(q('SELECT * FROM users WHERE id=?', (uid,), one=True))
 
@@ -310,6 +327,8 @@ def patient_info(key):
             return dict(r, source='device', session_start_ms=r['start_ms']) if r else None
         if kind == 'up':
             r = q('SELECT * FROM uploads WHERE id=?', (int(ident),), one=True)
+            if r and r.get('extra'):
+                r['extra'] = json.loads(r['extra'])            # raw-ECG uploads: waveform, beats, risk trace
             return dict(r, source='upload', total_hours=r['n_hours']) if r else None
         if kind == 'replay':
             return replay_meta(ident)
@@ -669,6 +688,28 @@ async def notify_alarm(a, repeated=None):
     await broadcast({'type': 'notification', 'alert_id': a['id'], 'ok': ok, 'detail': detail}, to=uid)
 
 
+async def escalate_to_caregivers():
+    """Escalation chain: an alarm nobody acknowledged within caregiver_escalate_min minutes is texted to the
+    patient's caregiver (once per alarm). Acknowledging the alarm in time cancels it."""
+    c = CONFIG
+    if not c['sms_enabled'] or not c['sms_gateway_url']:
+        return
+    due = now_ms() - float(c['caregiver_escalate_min']) * 60000
+    for a in q("SELECT * FROM alerts WHERE severity='alarm' AND end_ms IS NULL AND acked=0 AND escalated_ms IS NULL "
+               "AND patient LIKE 'sess:%' AND start_ms <= ?", (due,)):
+        x('UPDATE alerts SET escalated_ms=? WHERE id=?', (now_ms(), a['id']))      # decided once per alarm
+        uid = owner(a['patient'])
+        u = q('SELECT * FROM users WHERE id=?', (uid,), one=True) if uid else None
+        if not u or not u.get('caregiver_phone'):
+            continue
+        text = notify.caregiver_text(u.get('caregiver_name'), u['name'], a['message'], int(c['caregiver_escalate_min']))
+        ok, detail = await asyncio.to_thread(notify.send_sms, c, u['caregiver_phone'], text)
+        x('INSERT INTO notifications (alert_id, user_id, phone, sent_ms, ok, detail) VALUES (?,?,?,?,?,?)',
+          (a['id'], uid, u['caregiver_phone'], now_ms(), int(ok), 'caregiver: ' + detail))
+        print(f'caregiver SMS to {u["caregiver_phone"]}: {"sent" if ok else "FAILED"} ({detail})')
+        await broadcast({'type': 'notification', 'alert_id': a['id'], 'ok': ok, 'detail': 'caregiver: ' + detail}, to=uid)
+
+
 def device_status():
     now = now_ms()
     d = dict(DEVICE)
@@ -707,6 +748,7 @@ async def worker():
                     await broadcast({'type': 'prediction', 'patient': key, **pred, 'threshold': alarm_threshold()}, to=owner(key))
             events += vital_and_device_alerts()
             await emit_alerts(events)
+            await escalate_to_caregivers()
             await broadcast({'type': 'status', 'device': device_status()})
         except Exception as e:  # keep the service alive whatever happens
             print('worker error:', repr(e))
@@ -788,6 +830,7 @@ def api_me_now(req: Request):
             out['outlook'] = outlook_for(hz)
             out['prediction'] = dict(hour=last['hour'], quality=json.loads(last['quality']), reasons=json.loads(last['reasons']),
                                      risk=last['risk'], risk_lo=last['risk_lo'], risk_hi=last['risk_hi'])
+            out['why'] = explain.why(out['prediction']['reasons'])
     return clean(out)
 
 
@@ -795,7 +838,8 @@ def api_me_now(req: Request):
 def api_me_history(req: Request):
     u = current_user(req)
     sess = q('SELECT * FROM monitor_sessions WHERE user_id=? ORDER BY id DESC', (u['id'],))
-    ups = q('SELECT * FROM uploads WHERE user_id=? ORDER BY id DESC', (u['id'],))
+    ups = q('SELECT id, user_id, name, created_ms, n_hours, age, gender, label_start_hour, onset_hour FROM uploads '
+            'WHERE user_id=? ORDER BY id DESC', (u['id'],))
     for items, kind in ((sess, 'sess'), (ups, 'up')):
         for r in items:
             r['key'] = f"{kind}:{r['id']}"
@@ -851,6 +895,124 @@ async def api_upload(req: Request):
         raise HTTPException(503, 'no trained model loaded - run 02_ML/train.py')
     await asyncio.to_thread(predict_patient, key, rows)
     return {'key': key, 'hours': len(rows)}
+
+
+def _ecg_samples(text):
+    """Raw ECG samples from pasted / uploaded text: one long row (or several wide rows) of numbers,
+    or one sample per line (if a line has several columns, e.g. time,value, the last one is the signal)."""
+    num = lambda s: (lambda v: v if np.isfinite(v) else None)(float(s)) if re.fullmatch(r'\s*-?\d+(\.\d+)?([eE]-?\d+)?\s*', s) else None
+    rows = [re.split(r'[,;\t| ]+', l.strip()) for l in (text or '').splitlines() if l.strip()]
+    if not rows:
+        return np.array([])
+    wide = len(rows) == 1 or all(len(r) > 20 for r in rows)
+    vals = [num(v) for r in rows for v in r] if wide else [num(r[-1]) for r in rows]
+    return np.array([v for v in vals if v is not None], float)
+
+
+def ecg_to_vitals(x, fs):
+    """R-peaks -> heart rate, HRV and (>= 30 s of beats) breathing rate, per hour of recording.
+    The same steps as the node + backend: 0.5-40 Hz band-pass, beat detection with a 300 ms refractory period,
+    plausible RR intervals only (0.3-2.0 s), breathing rate from the beats (EDR + RSA, respiration.py)."""
+    from scipy.signal import butter, filtfilt, find_peaks
+    hi = min(40.0, 0.45 * fs)
+    b_, a_ = butter(2, [0.5 / (fs / 2), hi / (fs / 2)], btype='band')
+    y = filtfilt(b_, a_, x - x.mean())
+    if abs(y.min()) > abs(y.max()):            # R-waves can point down, depending on electrode placement
+        y = -y
+    pk, _ = find_peaks(y, distance=max(1, int(0.3 * fs)), prominence=0.35 * np.std(y))
+    t, amp = pk / fs, x[pk]
+    hours = []
+    for h in range(int(len(x) / fs // 3600) + 1):
+        m = (t >= h * 3600) & (t < (h + 1) * 3600)
+        th, ah = t[m], amp[m]
+        rr = np.diff(th)
+        ok = (rr > 0.3) & (rr < 2.0)
+        if ok.sum() < 3:
+            hours.append(dict(hour=h, HR=None, Resp=None, beats=int(m.sum()), quality=0.0))
+            continue
+        good = rr[ok]
+        cv = float(np.std(good) / np.mean(good))
+        quality = float(ok.mean() * (1.0 if cv < 0.15 else max(0.0, 1 - (cv - 0.15) * 3)))
+        est = respiration.estimate(list(th), list(ah), [], [])
+        resp = est['rr'] if est['rr'] is not None and est['quality'] >= 0.3 else None
+        rmssd = float(np.sqrt(np.mean(np.diff(good) ** 2)) * 1000) if len(good) > 2 else None
+        hours.append(dict(hour=h, HR=float(60.0 / np.median(good)), Resp=resp, resp_quality=est['quality'],
+                          rmssd=rmssd, beats=int(m.sum()), quality=quality))
+    return hours, t
+
+
+def risk_trace(t_beats, dur, age, gender, window_s=10.0, max_points=120):
+    """'Continuous' risk across a short ECG recording: every few seconds, the heart rate of the last `window_s`
+    seconds is put through the models as a single hour (no history). Shows how the estimate moves with the
+    heart rate during the recording."""
+    win = min(window_s, max(3.0, dur / 3))      # short recordings: a shorter window so the trace covers most of it
+    step = max(0.5, dur / max_points)
+    pts = []
+    for te in np.arange(win, dur + 1e-9, step):
+        m = (t_beats > te - win) & (t_beats <= te)
+        rr = np.diff(t_beats[m])
+        ok = (rr > 0.3) & (rr < 2.0)
+        if ok.sum() < 3:
+            continue
+        hr = float(60.0 / np.median(rr[ok]))
+        pr = MODEL.predict_hours(pd.DataFrame([{'HR': hr, 'O2Sat': np.nan, 'Temp': np.nan, 'Resp': np.nan,
+                                                'Age': float(age), 'Gender': float(gender)}]))[0]
+        pts.append(dict(t=float(te), hr=hr, risk=pr['risk'], lo=pr['risk_lo'], hi=pr['risk_hi'],
+                        horizons={h: v['risk'] for h, v in pr['horizons'].items()}))
+    return pts
+
+
+@app.post('/api/v1/uploads/ecg')
+async def api_upload_ecg(req: Request):
+    """Raw ECG waveform (e.g. AD8232 samples) at a user-given sampling rate -> derived hourly vitals -> the same
+    6/12/24 h models. Everything derived and assumed is returned so the dashboard can show it."""
+    u = current_user(req)
+    b = await req.json()
+    try:
+        fs = float(b.get('fs') or 250)
+    except (TypeError, ValueError):
+        raise HTTPException(400, 'sampling rate must be a number (samples per second)')
+    if not 20 <= fs <= 5000:
+        raise HTTPException(400, 'sampling rate must be between 20 and 5000 Hz')
+    sig = _ecg_samples(b.get('content'))
+    if len(sig) < 5 * fs:
+        raise HTTPException(400, f'need at least 5 seconds of ECG: {len(sig)} samples at {fs:g} Hz is {len(sig) / fs:.1f} s')
+    if MODEL is None:
+        raise HTTPException(503, 'no trained model loaded - run 02_ML/train.py')
+    hours, t_beats = await asyncio.to_thread(ecg_to_vitals, sig, fs)
+    if all(h['HR'] is None for h in hours):
+        raise HTTPException(400, 'no regular heartbeats found in this signal - check the electrodes or the sampling rate')
+    age = float(b.get('age')) if b.get('age') not in (None, '') else u['age']
+    g = int(b.get('gender')) if b.get('gender') not in (None, '') else u['gender']
+    name = f"{str(b.get('name') or 'ecg')[:90]} (raw ECG, {fs:g} Hz)"
+    uid = x('INSERT INTO uploads (user_id, name, created_ms, n_hours, age, gender, label_start_hour, onset_hour) VALUES (?,?,?,?,?,?,?,?)',
+            (u['id'], name, now_ms(), len(hours), age, g, None, None))
+    key, t0 = f'up:{uid}', now_ms()
+    rows = [{'hour': h['hour'], 't_ms': t0 + h['hour'] * 3600000, 'HR': _nan(h['HR']), 'O2Sat': np.nan, 'Temp': np.nan,
+             'Resp': _nan(h['Resp']), 'SBP': np.nan, 'label': None, 'coverage': {}} for h in hours]
+    await asyncio.to_thread(predict_patient, key, rows)
+    dur = len(sig) / fs
+    first = next(h for h in hours if h['HR'] is not None)
+    warn = []
+    if dur < 30:
+        warn.append(f'Only {dur:.0f} s of ECG: breathing rate needs at least 30 s, so the outlook uses heart rate alone.')
+    elif first['Resp'] is None:
+        warn.append('Breathing rate could not be estimated reliably from this recording.')
+    if first['quality'] < 0.6:
+        warn.append('The beat-to-beat rhythm is irregular or noisy, so the heart rate may be unreliable.')
+    if not 45 <= first['HR'] <= 130:
+        warn.append(f'A heart rate of {first["HR"]:.0f} bpm is unusual at rest: check that {fs:g} Hz is the right sampling rate.')
+    warn.append('SpO₂ and temperature are not in an ECG recording, so the model treats them as unmeasured.')
+    summary = dict(fs=fs, samples=int(len(sig)), duration_s=dur, beats=sum(h['beats'] for h in hours), hr=first['HR'],
+                   rr=first['Resp'], rmssd=first.get('rmssd'), quality=first['quality'], warnings=warn)
+    # waveform (at most ~5000 points for drawing), beat times and the continuous risk trace, kept with the upload
+    stride = max(1, int(np.ceil(len(sig) / 5000)))
+    trace = await asyncio.to_thread(risk_trace, t_beats, dur, age, g)
+    extra = dict(summary=summary, ecg=dict(dt=stride / fs, v=[round(float(v), 2) for v in sig[::stride]],
+                                            beats=[round(float(v), 3) for v in t_beats]),
+                 trace=trace, trace_window_s=min(10.0, max(3.0, dur / 3)))
+    x('UPDATE uploads SET extra=? WHERE id=?', (json.dumps(clean(extra)), uid))
+    return clean({'key': key, 'hours': len(rows), 'summary': summary})
 
 
 @app.delete('/api/v1/uploads/{uid}')
@@ -985,6 +1147,7 @@ def api_hourly(pid: str, req: Request):
     last = p[-1] if p else None
     return clean({'hourly': h, 'predictions': p, 'threshold': alarm_threshold(), 'thresholds': horizon_thresholds(),
                   'patient': info, 'outlook': outlook_for(last['horizons']) if last and last['horizons'] else [],
+                  'why': explain.why(last['reasons']) if last else None,
                   'seconds_per_model_hour': CONFIG['seconds_per_model_hour'] if pid.startswith('sess:') else 3600})
 
 
@@ -995,9 +1158,12 @@ def api_alerts(req: Request, limit: int = 100):
     marks = ','.join('?' * len(keys))
     rows = q(f"SELECT * FROM alerts WHERE patient IN ({marks}) OR patient LIKE 'replay:%' ORDER BY id DESC LIMIT ?",
              (*keys, limit))
-    sms = {r['alert_id']: r for r in q('SELECT * FROM notifications WHERE user_id=? ORDER BY id', (u['id'],))}
+    notes = q('SELECT * FROM notifications WHERE user_id=? ORDER BY id', (u['id'],))
+    sms = {r['alert_id']: r for r in notes if not str(r['detail']).startswith('caregiver')}
+    care = {r['alert_id']: r for r in notes if str(r['detail']).startswith('caregiver')}
     for r in rows:
         r['sms'] = sms.get(r['id'])
+        r['caregiver_sms'] = care.get(r['id'])
     return rows
 
 
@@ -1030,13 +1196,20 @@ async def api_config_put(req: Request):
 
 
 @app.post('/api/v1/sms/test')
-async def api_sms_test(req: Request):
+async def api_sms_test(req: Request, to: str = 'me'):
     u = current_user(req)
-    ok, detail = await asyncio.to_thread(notify.send_sms, CONFIG, u['phone'],
-                                         f'SeptiSense test message for {u["name"]}: phone alerts are working.')
+    if to == 'caregiver':
+        if not u.get('caregiver_phone'):
+            raise HTTPException(400, 'no caregiver phone number saved in your profile')
+        phone = u['caregiver_phone']
+        text = (f'SeptiSense test message: you are listed as the caregiver of {u["name"]}. '
+                'You will get a text if one of their alarms is not acknowledged in time.')
+    else:
+        phone, text = u['phone'], f'SeptiSense test message for {u["name"]}: phone alerts are working.'
+    ok, detail = await asyncio.to_thread(notify.send_sms, CONFIG, phone, text)
     x('INSERT INTO notifications (alert_id, user_id, phone, sent_ms, ok, detail) VALUES (?,?,?,?,?,?)',
-      (None, u['id'], u['phone'], now_ms(), int(ok), 'test: ' + detail))
-    return {'ok': ok, 'detail': detail, 'phone': u['phone']}
+      (None, u['id'], phone, now_ms(), int(ok), 'test: ' + detail))
+    return {'ok': ok, 'detail': detail, 'phone': phone}
 
 
 @app.post('/api/v1/temp/calibrate')

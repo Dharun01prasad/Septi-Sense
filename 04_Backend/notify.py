@@ -33,6 +33,12 @@ def repeat_text(name, label, count, minutes, message):
             f'Latest: {message}. Research prototype, not a diagnosis. If you feel unwell contact a doctor; emergency 112.')
 
 
+def caregiver_text(caregiver, patient, message, minutes):
+    hello = f'Hello {caregiver}, ' if caregiver else ''
+    return (f'{hello}SeptiSense: {patient} has had an alarm for {minutes} min that nobody has acknowledged: {message}. '
+            'Please check on them. Research prototype, not a diagnosis; emergency 112.')
+
+
 def send_sms(cfg, phone, text, timeout=8):
     """Returns (ok, detail). Never raises."""
     url = (cfg.get('sms_gateway_url') or '').strip().rstrip('/')

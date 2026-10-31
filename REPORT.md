@@ -311,14 +311,14 @@ CSV or PhysioNet `.psv`, one row per hour, oldest first; columns HR, O2Sat/SpO2,
 
 | Page | What the patient sees | Extra with **Technical details** on |
 |---|---|---|
-| **Sign in / Create account** | Phone + password; sign-up asks name, phone, age, sex | — |
-| **Home** | Greeting; Start/Stop monitoring; a status card ("Mostly steady. One reading to watch.") with tips; four vital cards (heart rate, blood oxygen, temperature, breathing rate) labelled Normal / Slightly raised or low / Very high or low, with a one-line explanation and the usual range; the **6 / 12 / 24 h outlook** as Low / Raised / High; a "how are you feeling" check-in (not saved) | Live ECG and PPG waveforms; raw numbers; exact risk %, band, threshold, reasons; signal-quality bars; device and connectivity panel; 30-minute trend charts |
-| **History** | Every session and recording; summary (overall result, data quality, average HR); outlook at the end; hour-by-hour Low/Raised/High grid with "first raised reading" and recorded-onset markers; CSV download | 6 h risk chart with threshold line |
+| **Sign in / Create account** | Phone + password; sign-up asks name, phone, age, sex and an optional caregiver (name + phone) | — |
+| **Home** | Start/Stop monitoring and **Share with my doctor**; a colour-coded status banner ("Your readings are in the normal range" / "Some readings are outside the normal range" / "Some readings need medical attention") with tips; four vital cards (heart rate, blood oxygen, temperature, breathing rate) labelled Normal / Outside normal range / Far outside normal / No reading, with a one-line explanation and the normal range; the **6 / 12 / 24 h outlook** as Low / Raised / High with **"Why this outlook?"** | Live ECG and PPG waveforms; raw numbers; exact risk %, band, threshold, reasons; signal-quality bars; device and connectivity panel; 30-minute trend charts |
+| **History** | Every session and recording; latest outlook with **"Why this outlook?"**; hour-by-hour Low/Raised/High strips with the recorded onset where known; **Share with my doctor** (printable report); CSV download | 6 h risk chart with threshold line; full list of reasons |
 | **Check a recording** | Upload a file (or pick an example), enter age/sex, get the same result view | Same as History |
-| **Alerts** | Active alerts (alarm / warning) with Acknowledge and SMS status; alert history | — |
-| **Settings** | Profile; "Text me when there is an alarm"; test SMS; temperature/breathing limits, demo time, temperature offset | All alarm thresholds and limits; calibration against a thermometer |
+| **Alerts** | Active alerts (alarm / warning) with Acknowledge, SMS status and caregiver status ("caregiver will be texted at 14:32 unless acknowledged" / "caregiver texted ✓"); alert history | — |
+| **Settings** | Profile; "Text me when an alarm-level alert is raised"; caregiver name + phone with a test SMS; SMS gateway set-up and test SMS | All alarm thresholds and limits (incl. caregiver delay and repeat rule); demo time; calibration against a thermometer |
 
-Always visible: "Research prototype — not a medical device", emergency number 112, the sensor-connection status, a **SIMULATED DATA** badge whenever the device is the simulator, and a **DEMO TIME** badge whenever time is compressed. "How it works" / "About this prototype" opens a short description of the components and limitations.
+Always visible: "Educational research prototype — not a medical device", emergency number 112, the sensor-connection status, a **SIMULATED DATA** badge whenever the device is the simulator, a **DEMO TIME** badge whenever time is compressed, and a **Dark / Light** theme button (opens light).
 
 Normal ranges on the Home page are the **NEWS2** bands (Royal College of Physicians, 2017): heart rate 51–90, breathing 12–20, SpO₂ ≥ 96 %, temperature 36.1–38.0 °C.
 
@@ -331,6 +331,7 @@ Normal ranges on the Home page are the **NEWS2** bands (Royal College of Physici
   1. an **alarm**-level alert is raised (or a warning escalates to an alarm), or
   2. the **same alert comes back 3 times within 30 minutes**, even if it's only a warning.
 - **Limits:** at most one SMS per patient **per alert type** every 15 minutes. All values are adjustable.
+- **Caregiver escalation:** a patient can add a caregiver (name + phone) at sign-up or in Settings. If an **alarm** stays unacknowledged for 10 minutes (adjustable), the caregiver gets one SMS asking them to check on the patient. Acknowledging the alarm in time cancels it. The Alerts page shows when the caregiver will be texted, and whether they were.
 - Every attempt (sent, failed, or held back by the rate limit) is logged and shown next to the alert.
 - Message wording always says it is a research prototype, not a diagnosis, and gives the emergency number.
 
@@ -347,7 +348,9 @@ Normal ranges on the Home page are the **NEWS2** bands (Royal College of Physici
 7. **Personal baseline features, ensemble uncertainty band and per-prediction reasons.**
 8. **Multi-horizon outlook (6 / 12 / 24 h)** in plain language for non-technical users, with technical details one switch away.
 9. **Store-and-forward telemetry.** 15-minute buffer, sequence numbers, boot ID, acknowledgements, gap and late-record accounting.
-10. **Offline SMS alerts** through a phone on the same hotspot, with repeat detection and rate limiting.
+10. **Offline SMS alerts** through a phone on the same hotspot, with repeat detection, rate limiting and a **caregiver escalation chain** for unacknowledged alarms.
+12. **"Why?" in plain words.** The model's per-prediction reasons (tree SHAP) are turned into sentences a patient understands, e.g. *"Mainly your breathing rate over the last 6 hours (about 24 /min) and your temperature being higher than your own normal are pushing the estimate up."* They are labelled as the factors the model weighed most, not medical causes.
+13. **"Share with my doctor".** One click produces a printable one-page summary (outlook, main factors, vital-sign medians/ranges with trend lines, hour-by-hour outlook, alerts, data quality, model performance and limitations) that can be saved as PDF.
 11. **Same pipeline for live and recorded data.** Uploaded recordings get the identical analysis.
 
 ---
@@ -396,7 +399,7 @@ Normal ranges on the Home page are the **NEWS2** bands (Royal College of Physici
 - End-to-end run on the real hardware (after the ESP32 repair): R-peak threshold, MAX30102 finger threshold, OLED size, Wi-Fi buffering in practice.
 - Breathing-rate accuracy on real people against a counted reference.
 - SpO₂ against a reference pulse oximeter; temperature against a thermometer.
-- The most recent changes (dark theme, on-skin temperature check, repeated-alert SMS) after their final test run.
+- The most recent changes (dark theme, on-skin temperature check, repeated-alert SMS, caregiver escalation, "Why?" explanations, doctor report) after their final test run.
 
 ---
 
